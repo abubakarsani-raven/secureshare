@@ -1,0 +1,86 @@
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE TABLE users (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email           TEXT UNIQUE NOT NULL,
+  password_hash   TEXT NOT NULL,
+  totp_secret     TEXT,
+  created_at      TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE shares (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sender_id             UUID REFERENCES users(id) ON DELETE CASCADE,
+  token_hash            TEXT UNIQUE NOT NULL,
+  token_lookup          TEXT,
+  type                  TEXT NOT NULL CHECK (type IN ('document','image','video','audio','message')),
+  storage_path          TEXT,
+  ciphertext            TEXT,
+  key_fragment_b        TEXT,
+  recipient_name        TEXT NOT NULL,
+  recipient_email_hash  TEXT NOT NULL,
+  recipient_email_hint  TEXT NOT NULL,
+  max_views             INT DEFAULT 1,
+  view_count            INT DEFAULT 0,
+  expires_at            TIMESTAMPTZ,
+  revoked               BOOLEAN DEFAULT false,
+  otp_required          BOOLEAN DEFAULT true,
+  ip_bound              TEXT,
+  device_bound          TEXT,
+  geo_allowed           TEXT[],
+  time_window_start     TIME,
+  time_window_end       TIME,
+  watermark_seed        TEXT NOT NULL,
+  self_destruct_seconds INT,
+  destroyed_at          TIMESTAMPTZ,
+  page_count            INT,
+  duration_seconds      FLOAT,
+  chunk_count           INT,
+  created_at            TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_shares_token_lookup ON shares(token_lookup);
+CREATE INDEX idx_shares_sender_id ON shares(sender_id);
+
+CREATE TABLE otps (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  share_id    UUID REFERENCES shares(id) ON DELETE CASCADE,
+  code_hash   TEXT NOT NULL,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  used        BOOLEAN DEFAULT false,
+  attempts    INT DEFAULT 0,
+  created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_otps_share_id ON otps(share_id);
+
+CREATE TABLE audit_log (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  share_id        UUID REFERENCES shares(id) ON DELETE CASCADE,
+  event           TEXT NOT NULL,
+  ip_address      TEXT,
+  country         TEXT,
+  city            TEXT,
+  device          TEXT,
+  browser         TEXT,
+  os              TEXT,
+  device_fp       TEXT,
+  timestamp       TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_audit_log_share_id ON audit_log(share_id);
+
+ALTER TABLE shares ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "users_own_data" ON users FOR ALL USING (auth.uid() = id);
+CREATE POLICY "own_shares" ON shares FOR ALL USING (auth.uid() = sender_id);
+CREATE POLICY "own_audit" ON audit_log FOR SELECT USING (
+  EXISTS (SELECT 1 FROM shares WHERE shares.id = audit_log.share_id AND shares.sender_id = auth.uid())
+);
+CREATE POLICY "audit_insert_only" ON audit_log FOR INSERT WITH CHECK (true);
+REVOKE UPDATE ON audit_log FROM authenticated;
+REVOKE DELETE ON audit_log FROM authenticated;
+
+-- Create private storage bucket 'secureshare-files' via Supabase Dashboard (no public access)
