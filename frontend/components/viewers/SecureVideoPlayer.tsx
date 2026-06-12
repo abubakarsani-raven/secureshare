@@ -8,15 +8,17 @@ import { secureCanvas } from '@/lib/secureCanvas';
 import AntiCapture from '@/components/security/AntiCapture';
 import FocusGuard from '@/components/security/FocusGuard';
 import DevToolsDetector from '@/components/security/DevToolsDetector';
+import GpuWatermark from '@/components/security/GpuWatermark';
 import { Play, Pause, Volume2 } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 interface Props {
   token: string;
+  watermark: string;
 }
 
-export default function SecureVideoPlayer({ token }: Props) {
+export default function SecureVideoPlayer({ token, watermark }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -107,7 +109,8 @@ export default function SecureVideoPlayer({ token }: Props) {
               </div>
             )}
             <canvas ref={canvasRef} className="w-full max-h-[70vh]" width={640} height={360} />
-            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 p-4 flex items-center gap-4">
+            <GpuWatermark label={watermark} />
+            <div className="absolute bottom-0 left-0 right-0 z-30 bg-gradient-to-t from-black/80 p-4 flex items-center gap-4">
               <button onClick={togglePlay} className="text-white p-2 hover:bg-white/20 rounded">
                 {playing ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
               </button>

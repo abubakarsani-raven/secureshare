@@ -78,13 +78,25 @@ export default function ViewPage() {
     );
   }
 
+  // Per-recipient forensic label baked into every rendered view.
+  const watermarkLabel = `${info.recipientName} · ${token.slice(0, 8)} · ${new Date()
+    .toISOString()
+    .slice(0, 16)
+    .replace('T', ' ')}`;
+
   const viewers: Record<string, React.ReactNode> = {
-    document: <SecureDocViewer token={token} pageCount={shareInfo?.pageCount || 0} />,
-    image: <SecureImageViewer token={token} />,
-    video: <SecureVideoPlayer token={token} />,
+    document: (
+      <SecureDocViewer token={token} pageCount={shareInfo?.pageCount || 0} watermark={watermarkLabel} />
+    ),
+    image: <SecureImageViewer token={token} watermark={watermarkLabel} />,
+    video: <SecureVideoPlayer token={token} watermark={watermarkLabel} />,
     audio: <SecureAudioPlayer token={token} chunkCount={shareInfo?.chunkCount || 0} />,
     message: (
-      <SecureMessageViewer token={token} selfDestructSeconds={shareInfo?.selfDestructSeconds ?? null} />
+      <SecureMessageViewer
+        token={token}
+        selfDestructSeconds={shareInfo?.selfDestructSeconds ?? null}
+        watermark={watermarkLabel}
+      />
     ),
   };
 

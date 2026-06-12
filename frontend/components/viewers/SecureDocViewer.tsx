@@ -6,6 +6,7 @@ import { secureCanvas } from '@/lib/secureCanvas';
 import AntiCapture from '@/components/security/AntiCapture';
 import FocusGuard from '@/components/security/FocusGuard';
 import DevToolsDetector from '@/components/security/DevToolsDetector';
+import GpuWatermark from '@/components/security/GpuWatermark';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface Props {
@@ -13,9 +14,10 @@ interface Props {
   // Provided by the page's single /info fetch — fetching /info here too would
   // consume an extra view and can lock out max_views=1 shares.
   pageCount: number;
+  watermark: string;
 }
 
-export default function SecureDocViewer({ token, pageCount }: Props) {
+export default function SecureDocViewer({ token, pageCount, watermark }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -48,6 +50,7 @@ export default function SecureDocViewer({ token, pageCount }: Props) {
             <div className="relative bg-zinc-100 rounded-lg overflow-hidden min-h-[400px] flex items-center justify-center">
               {loading && <div className="absolute text-zinc-500">Loading page...</div>}
               <canvas ref={canvasRef} className="max-w-full max-h-[70vh]" />
+              <GpuWatermark label={watermark} />
             </div>
             {pageCount > 1 && (
               <div className="flex items-center gap-4">

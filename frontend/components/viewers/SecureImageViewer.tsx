@@ -6,12 +6,14 @@ import { secureCanvas } from '@/lib/secureCanvas';
 import AntiCapture from '@/components/security/AntiCapture';
 import FocusGuard from '@/components/security/FocusGuard';
 import DevToolsDetector from '@/components/security/DevToolsDetector';
+import GpuWatermark from '@/components/security/GpuWatermark';
 
 interface Props {
   token: string;
+  watermark: string;
 }
 
-export default function SecureImageViewer({ token }: Props) {
+export default function SecureImageViewer({ token, watermark }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [loading, setLoading] = useState(true);
 
@@ -38,9 +40,10 @@ export default function SecureImageViewer({ token }: Props) {
     <DevToolsDetector>
       <AntiCapture>
         <FocusGuard>
-          <div className="flex justify-center bg-zinc-100 rounded-lg min-h-[400px] items-center">
+          <div className="relative flex justify-center bg-zinc-100 rounded-lg min-h-[400px] items-center">
             {loading && <div className="absolute text-zinc-500">Loading image...</div>}
             <canvas ref={canvasRef} className="max-w-full max-h-[70vh]" />
+            <GpuWatermark label={watermark} />
           </div>
         </FocusGuard>
       </AntiCapture>

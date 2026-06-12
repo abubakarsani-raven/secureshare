@@ -8,13 +8,15 @@ import { useViewSession } from '@/context/ViewSessionContext';
 import AntiCapture from '@/components/security/AntiCapture';
 import FocusGuard from '@/components/security/FocusGuard';
 import DevToolsDetector from '@/components/security/DevToolsDetector';
+import GpuWatermark from '@/components/security/GpuWatermark';
 
 interface Props {
   token: string;
   selfDestructSeconds?: number | null;
+  watermark: string;
 }
 
-export default function SecureMessageViewer({ token, selfDestructSeconds }: Props) {
+export default function SecureMessageViewer({ token, selfDestructSeconds, watermark }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [countdown, setCountdown] = useState(selfDestructSeconds || 0);
   const [destroyed, setDestroyed] = useState(false);
@@ -114,6 +116,7 @@ export default function SecureMessageViewer({ token, selfDestructSeconds }: Prop
               </div>
             )}
             <canvas ref={canvasRef} className="w-full border rounded-xl bg-white" />
+            <GpuWatermark label={watermark} />
           </div>
         </FocusGuard>
       </AntiCapture>
