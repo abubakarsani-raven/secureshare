@@ -18,7 +18,7 @@ interface Props {
 // sits above the content; because it is part of the rendered pixels it survives
 // screenshots, unlike invisible LSB/DCT marks. It carries a light+dark pair so
 // the mark is recoverable on both light and dark backgrounds.
-export default function GpuWatermark({ label, opacity = 0.08 }: Props) {
+export default function GpuWatermark({ label, opacity = 0.1 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {

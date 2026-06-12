@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
+import sharp from 'sharp';
 import { extractWatermark } from '../services/watermark/extractor';
 import { AuthPayload } from '../middleware/auth';
 import { getSupabase } from '../services/storage';
@@ -35,6 +36,33 @@ function requireAdminOrUser(req: Request, res: Response, next: NextFunction): vo
   res.status(403).json({ error: 'Forbidden' });
 }
 
+// Reveals the faint visible (on-screen) watermark from a leaked screenshot by
+// isolating high-frequency detail (image minus its blur) and stretching the
+// contrast. The watermark text rides as low-amplitude pixels that this makes
+// legible, independent of whether the background is light or dark. Returns a
+// PNG data URL the dashboard can display so a human can read the recipient label.
+async function revealWatermark(buffer: Buffer): Promise<string | null> {
+  try {
+    // The on-screen watermark is dark text at ~10% opacity, so over a light
+    // background its pixels land just below white (~225-250). Hard-stretch that
+    // near-white band to full range: the faint label becomes dark-on-white and
+    // legible, while true content (strong darks) clips to black. Gain/offset map
+    // roughly [222,255] -> [0,255].
+    const gain = 12;
+    const offset = -233 * gain;
+    const revealed = await sharp(buffer)
+      .greyscale()
+      .linear(gain, offset)
+      .sharpen()
+      .png()
+      .toBuffer();
+    return `data:image/png;base64,${revealed.toString('base64')}`;
+  } catch (err) {
+    logger.warn('Watermark reveal failed', { error: String(err) });
+    return null;
+  }
+}
+
 router.post('/extract', requireAdminOrUser, upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
@@ -43,8 +71,14 @@ router.post('/extract', requireAdminOrUser, upload.single('file'), async (req: R
     }
 
     const result = await extractWatermark(req.file.buffer);
+
+    // Always compute a reveal image: the invisible LSB/DCT marks (below) only
+    // exist on image/PDF shares and do not survive screenshots, whereas the
+    // faint on-screen watermark does — this surfaces it for any screenshot.
+    const reveal = await revealWatermark(req.file.buffer);
+
     if (!result.found || !result.payload) {
-      res.json({ found: false, payload: null });
+      res.json({ found: false, payload: null, reveal });
       return;
     }
 
@@ -58,7 +92,7 @@ router.post('/extract', requireAdminOrUser, upload.single('file'), async (req: R
         .eq('sender_id', req.user.userId)
         .single();
       if (!share) {
-        res.json({ found: false, payload: null });
+        res.json({ found: false, payload: null, reveal });
         return;
       }
     }
@@ -67,6 +101,7 @@ router.post('/extract', requireAdminOrUser, upload.single('file'), async (req: R
       found: true,
       method: result.method,
       payload: result.payload,
+      reveal,
     });
   } catch (err) {
     logger.error('Extract error', { error: String(err) });

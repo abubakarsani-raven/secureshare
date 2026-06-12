@@ -14,6 +14,9 @@ interface ExtractResult {
     timestamp: number;
     email: string;
   };
+  // Contrast-amplified image that surfaces the faint on-screen watermark text
+  // so the recipient label can be read off a leaked screenshot.
+  reveal?: string | null;
 }
 
 export default function LeakInvestigator() {
@@ -69,14 +72,29 @@ export default function LeakInvestigator() {
         </button>
       </div>
       {result && (
-        <div className="mt-4 p-4 rounded-lg bg-zinc-50">
+        <div className="mt-4 p-4 rounded-lg bg-zinc-50 space-y-4">
           {result.found && result.payload ? (
             <div className="space-y-2 text-sm">
-              <p className="font-medium text-green-700">Watermark found ({result.method})</p>
+              <p className="font-medium text-green-700">Embedded watermark found ({result.method})</p>
               <pre className="text-xs overflow-x-auto">{JSON.stringify(result.payload, null, 2)}</pre>
             </div>
           ) : (
-            <p className="text-zinc-500">No watermark found in this image.</p>
+            <p className="text-sm text-zinc-500">
+              No embedded LSB/DCT watermark — expected for screenshots and for message shares.
+              Use the revealed image below to read the on-screen watermark.
+            </p>
+          )}
+
+          {result.reveal && (
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Revealed on-screen watermark</p>
+              <p className="text-xs text-zinc-500">
+                Contrast-amplified to surface the faint diagonal label
+                (recipient · share · time). Best on plain backgrounds.
+              </p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={result.reveal} alt="Revealed watermark" className="w-full rounded border bg-white" />
+            </div>
           )}
         </div>
       )}
