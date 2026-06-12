@@ -52,7 +52,7 @@ export default function ShareForm({ type, accept, fileLabel, showSelfDestruct }:
           method: 'POST',
           auth: true,
           body: JSON.stringify({
-            ciphertext: JSON.stringify(encrypted),
+            ciphertext: encrypted.ciphertext,
             iv: encrypted.iv,
             salt: '',
             keyFragmentB: fragmentB,

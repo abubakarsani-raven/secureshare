@@ -9,7 +9,7 @@ import { uploadLimiter } from '../middleware/rateLimit';
 import { virusScan } from '../middleware/virusScan';
 import { validateMagicBytes, hashEmail, emailHint, tokenLookup, generateWatermarkSeed } from '../utils/helpers';
 import { shareOptionsSchema, messageUploadSchema, parseExpiry, expiryFromOption } from '../utils/validation';
-import { getSupabase } from '../services/storage';
+import { getSupabase, deleteShareFiles } from '../services/storage';
 import { generateToken, hashToken } from '../services/tokenService';
 import { processPdf } from '../services/processor/pdfProcessor';
 import { processImage } from '../services/processor/imageProcessor';
@@ -63,6 +63,21 @@ async function createShareRecord(
   return data.id;
 }
 
+// Removes any uploaded files and a possibly half-created share row after a
+// failed upload, so no orphaned records or storage objects are left behind.
+async function cleanupFailedShare(shareId: string): Promise<void> {
+  try {
+    await deleteShareFiles(`shares/${shareId}`);
+  } catch {
+    // best effort
+  }
+  try {
+    await getSupabase().from('shares').delete().eq('id', shareId);
+  } catch {
+    // best effort
+  }
+}
+
 function buildShareUrl(token: string, fragmentC?: string): string {
   const base = process.env.FRONTEND_URL || 'http://localhost:3000';
   const url = `${base}/view/${token}`;
@@ -92,6 +107,17 @@ function parseShareOptions(body: Record<string, string>): {
   };
 }
 
+function recipientFields(options: ReturnType<typeof parseShareOptions>): Record<string, unknown> {
+  return {
+    recipient_name: options.recipientName,
+    recipient_email_hash: hashEmail(options.recipientEmail),
+    recipient_email_hint: emailHint(options.recipientEmail),
+    max_views: options.maxViews === 999999 ? 0 : options.maxViews,
+    expires_at: options.expiresAt?.toISOString() || null,
+    otp_required: options.otpRequired,
+  };
+}
+
 function watermarkPayload(shareId: string, email: string): WatermarkPayload {
   return {
     recipientId: hashEmail(email).slice(0, 16),
@@ -108,6 +134,7 @@ router.post(
   uploadLimiter,
   uploadMemory.single('file'),
   async (req: Request, res: Response) => {
+    let shareId: string | null = null;
     try {
       if (!req.file) {
         res.status(400).json({ error: 'File required' });
@@ -125,25 +152,20 @@ router.post(
 
       const options = parseShareOptions(req.body);
       const token = generateToken();
-      const shareId = randomUUID();
+      shareId = randomUUID();
       const payload = watermarkPayload(shareId, options.recipientEmail);
 
-      await createShareRecord(req.user!.userId, token, 'document', shareId, {
-        recipient_name: options.recipientName,
-        recipient_email_hash: hashEmail(options.recipientEmail),
-        recipient_email_hint: emailHint(options.recipientEmail),
-        max_views: options.maxViews === 999999 ? 0 : options.maxViews,
-        expires_at: options.expiresAt?.toISOString() || null,
-        otp_required: options.otpRequired,
-      });
-
       const pageCount = await processPdf(req.file.buffer, shareId, payload);
-      const supabase = getSupabase();
-      await supabase.from('shares').update({ page_count: pageCount }).eq('id', shareId);
+
+      await createShareRecord(req.user!.userId, token, 'document', shareId, {
+        ...recipientFields(options),
+        page_count: pageCount,
+      });
       await logAudit(shareId, 'share_created', req);
 
       res.status(201).json({ token, shareUrl: buildShareUrl(token) });
     } catch (err) {
+      if (shareId) await cleanupFailedShare(shareId);
       logger.error('Document upload error', { error: String(err) });
       res.status(500).json({ error: 'Upload failed' });
     }
@@ -156,6 +178,7 @@ router.post(
   uploadLimiter,
   uploadMemory.single('file'),
   async (req: Request, res: Response) => {
+    let shareId: string | null = null;
     try {
       if (!req.file) {
         res.status(400).json({ error: 'File required' });
@@ -180,23 +203,17 @@ router.post(
 
       const options = parseShareOptions(req.body);
       const token = generateToken();
-      const shareId = randomUUID();
+      shareId = randomUUID();
       const payload = watermarkPayload(shareId, options.recipientEmail);
 
-      await createShareRecord(req.user!.userId, token, 'image', shareId, {
-        recipient_name: options.recipientName,
-        recipient_email_hash: hashEmail(options.recipientEmail),
-        recipient_email_hint: emailHint(options.recipientEmail),
-        max_views: options.maxViews === 999999 ? 0 : options.maxViews,
-        expires_at: options.expiresAt?.toISOString() || null,
-        otp_required: options.otpRequired,
-      });
-
       await processImage(req.file.buffer, shareId, payload);
+
+      await createShareRecord(req.user!.userId, token, 'image', shareId, recipientFields(options));
       await logAudit(shareId, 'share_created', req);
 
       res.status(201).json({ token, shareUrl: buildShareUrl(token) });
     } catch (err) {
+      if (shareId) await cleanupFailedShare(shareId);
       logger.error('Image upload error', { error: String(err) });
       res.status(500).json({ error: 'Upload failed' });
     }
@@ -210,6 +227,7 @@ router.post(
   uploadDisk500.single('file'),
   async (req: Request, res: Response) => {
     let tempPath: string | null = null;
+    let shareId: string | null = null;
     try {
       if (!req.file) {
         res.status(400).json({ error: 'File required' });
@@ -234,28 +252,21 @@ router.post(
 
       const options = parseShareOptions(req.body);
       const token = generateToken();
-      const shareId = randomUUID();
-
-      await createShareRecord(req.user!.userId, token, 'video', shareId, {
-        recipient_name: options.recipientName,
-        recipient_email_hash: hashEmail(options.recipientEmail),
-        recipient_email_hint: emailHint(options.recipientEmail),
-        max_views: options.maxViews === 999999 ? 0 : options.maxViews,
-        expires_at: options.expiresAt?.toISOString() || null,
-        otp_required: options.otpRequired,
-      });
+      shareId = randomUUID();
 
       const watermarkText = shareId.slice(0, 8);
       const { segmentCount, duration } = await processVideo(tempPath, shareId, watermarkText);
-      const supabase = getSupabase();
-      await supabase
-        .from('shares')
-        .update({ chunk_count: segmentCount, duration_seconds: duration })
-        .eq('id', shareId);
+
+      await createShareRecord(req.user!.userId, token, 'video', shareId, {
+        ...recipientFields(options),
+        chunk_count: segmentCount,
+        duration_seconds: duration,
+      });
       await logAudit(shareId, 'share_created', req);
 
       res.status(201).json({ token, shareUrl: buildShareUrl(token) });
     } catch (err) {
+      if (shareId) await cleanupFailedShare(shareId);
       logger.error('Video upload error', { error: String(err) });
       res.status(500).json({ error: 'Upload failed' });
     } finally {
@@ -271,6 +282,7 @@ router.post(
   uploadDisk100.single('file'),
   async (req: Request, res: Response) => {
     let tempPath: string | null = null;
+    let shareId: string | null = null;
     try {
       if (!req.file) {
         res.status(400).json({ error: 'File required' });
@@ -296,28 +308,21 @@ router.post(
 
       const options = parseShareOptions(req.body);
       const token = generateToken();
-      const shareId = randomUUID();
+      shareId = randomUUID();
       const payload = watermarkPayload(shareId, options.recipientEmail);
 
-      await createShareRecord(req.user!.userId, token, 'audio', shareId, {
-        recipient_name: options.recipientName,
-        recipient_email_hash: hashEmail(options.recipientEmail),
-        recipient_email_hint: emailHint(options.recipientEmail),
-        max_views: options.maxViews === 999999 ? 0 : options.maxViews,
-        expires_at: options.expiresAt?.toISOString() || null,
-        otp_required: options.otpRequired,
-      });
-
       const { chunkCount, duration } = await processAudio(tempPath, shareId, payload);
-      const supabase = getSupabase();
-      await supabase
-        .from('shares')
-        .update({ chunk_count: chunkCount, duration_seconds: duration })
-        .eq('id', shareId);
+
+      await createShareRecord(req.user!.userId, token, 'audio', shareId, {
+        ...recipientFields(options),
+        chunk_count: chunkCount,
+        duration_seconds: duration,
+      });
       await logAudit(shareId, 'share_created', req);
 
       res.status(201).json({ token, shareUrl: buildShareUrl(token) });
     } catch (err) {
+      if (shareId) await cleanupFailedShare(shareId);
       logger.error('Audio upload error', { error: String(err) });
       res.status(500).json({ error: 'Upload failed' });
     } finally {

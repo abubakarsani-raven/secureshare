@@ -56,13 +56,14 @@ Fill in environment variables:
 **Frontend (`frontend/.env.local`)**
 - `NEXT_PUBLIC_API_URL=http://localhost:3001`
 - `NEXT_PUBLIC_APP_URL=http://localhost:3000`
-- `ADMIN_SECRET` (same as backend, for leak investigator proxy)
 
 ### 2. Supabase
 
 1. Create a Supabase project
 2. Run `supabase/schema.sql` in the SQL editor
 3. Create a private storage bucket named `secureshare-files` (no public access)
+
+For databases created from an older schema, also run the additions at the bottom of `schema.sql`: the `increment_view_count` / `increment_otp_attempts` functions and `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN DEFAULT false;`.
 
 ### 3. Run backend
 
@@ -94,7 +95,8 @@ npm run dev
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | POST | `/api/auth/register` | — | Register user, returns JWT + TOTP setup URI |
-| POST | `/api/auth/login` | — | Login with email/password/TOTP |
+| POST | `/api/auth/totp/confirm` | JWT | Verify a TOTP code to enable 2FA for the account |
+| POST | `/api/auth/login` | — | Login with email/password (+TOTP once enabled) |
 | POST | `/api/auth/refresh` | — | Refresh access token |
 
 ### Upload (JWT required)
@@ -142,13 +144,13 @@ npm run dev
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/admin/extract` | X-Admin-Secret | Extract watermark from image |
+| POST | `/api/admin/extract` | X-Admin-Secret or user JWT | Extract watermark from image (JWT callers only see watermarks from their own shares) |
 
 ## Watermark Extraction
 
 ### Dashboard Leak Investigator
 
-Upload a suspected leaked screenshot/image in the dashboard. The frontend proxies to the admin extract API.
+Upload a suspected leaked screenshot/image in the dashboard. The request is authenticated with the logged-in user's JWT, and results are restricted to that user's own shares.
 
 ### CLI
 

@@ -36,18 +36,36 @@ export async function downloadFile(path: string): Promise<Buffer> {
   return Buffer.from(arrayBuffer);
 }
 
-export async function deleteShareFiles(prefix: string): Promise<void> {
+// Supabase storage list() is one level deep and remove() ignores folder paths,
+// so deletion must recurse into subfolders (pages/, video/, audio/).
+async function collectFilePaths(prefix: string, depth = 0): Promise<string[]> {
+  if (depth > 3) return [];
   const client = getSupabase();
-  const { data: files, error: listError } = await client.storage
+  const { data: entries, error } = await client.storage
     .from('secureshare-files')
     .list(prefix, { limit: 1000 });
-  if (listError) {
-    logger.warn('Failed to list files for deletion', { prefix, error: listError.message });
-    return;
+  if (error) {
+    logger.warn('Failed to list files for deletion', { prefix, error: error.message });
+    return [];
   }
-  if (!files || files.length === 0) return;
 
-  const paths = files.map((f) => `${prefix}/${f.name}`);
+  const paths: string[] = [];
+  for (const entry of entries || []) {
+    // Folders come back without an id; files have one
+    if (entry.id) {
+      paths.push(`${prefix}/${entry.name}`);
+    } else {
+      paths.push(...(await collectFilePaths(`${prefix}/${entry.name}`, depth + 1)));
+    }
+  }
+  return paths;
+}
+
+export async function deleteShareFiles(prefix: string): Promise<void> {
+  const client = getSupabase();
+  const paths = await collectFilePaths(prefix);
+  if (paths.length === 0) return;
+
   const { error } = await client.storage.from('secureshare-files').remove(paths);
   if (error) logger.warn('Failed to delete files', { prefix, error: error.message });
 }

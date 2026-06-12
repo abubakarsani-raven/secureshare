@@ -1,14 +1,14 @@
 import { Router, Request, Response } from 'express';
 import { otpSendSchema, otpVerifySchema } from '../utils/validation';
 import { findShareByToken, isShareAccessible } from '../services/shareService';
-import { hashEmail, deriveKeyFragment } from '../utils/helpers';
+import { hashEmail, deriveKeyFragment, safeCompare } from '../utils/helpers';
 import { getSupabase } from '../services/storage';
 import { generateOTP, sendOTP } from '../services/otpService';
 import { hashOtp, verifyOtp } from '../services/tokenService';
 import { signViewSession } from '../middleware/auth';
 import { logAudit } from '../services/auditService';
 import { otpLimiter } from '../middleware/rateLimit';
-import { getRateLimitCount, incrementRateLimit } from '../services/geoip';
+import { incrementRateLimit } from '../services/geoip';
 import { checkHoneypotAccess } from '../utils/honeypot';
 import { logger } from '../utils/logger';
 
@@ -29,7 +29,10 @@ router.post('/send', otpLimiter, async (req: Request, res: Response) => {
       return;
     }
 
-    await checkHoneypotAccess(share.id, share.recipient_name);
+    if (await checkHoneypotAccess(share.id, share.recipient_name)) {
+      res.status(404).json({ error: 'Share not found' });
+      return;
+    }
 
     const access = isShareAccessible(share);
     if (!access.ok) {
@@ -43,18 +46,18 @@ router.post('/send', otpLimiter, async (req: Request, res: Response) => {
     }
 
     const emailHash = hashEmail(email);
-    if (emailHash !== share.recipient_email_hash) {
+    if (!safeCompare(emailHash, share.recipient_email_hash)) {
       res.status(403).json({ error: 'Email does not match recipient' });
       return;
     }
 
+    // Increment first so concurrent requests cannot all pass a stale read
     const rateKey = `otp:send:${share.id}`;
-    const count = await getRateLimitCount(rateKey);
-    if (count >= 3) {
+    const count = await incrementRateLimit(rateKey, 3600);
+    if (count > 3) {
       res.status(429).json({ error: 'Too many OTP requests' });
       return;
     }
-    await incrementRateLimit(rateKey, 3600);
 
     const code = generateOTP();
     const codeHash = await hashOtp(code);
@@ -92,6 +95,11 @@ router.post('/verify', otpLimiter, async (req: Request, res: Response) => {
       return;
     }
 
+    if (await checkHoneypotAccess(share.id, share.recipient_name)) {
+      res.status(404).json({ error: 'Share not found' });
+      return;
+    }
+
     const access = isShareAccessible(share);
     if (!access.ok) {
       res.status(403).json({ error: access.reason });
@@ -109,7 +117,7 @@ router.post('/verify', otpLimiter, async (req: Request, res: Response) => {
     }
 
     const emailHash = hashEmail(email);
-    if (emailHash !== share.recipient_email_hash) {
+    if (!safeCompare(emailHash, share.recipient_email_hash)) {
       res.status(403).json({ error: 'Email does not match recipient' });
       return;
     }
@@ -141,8 +149,21 @@ router.post('/verify', otpLimiter, async (req: Request, res: Response) => {
 
     const valid = await verifyOtp(code, otp.code_hash);
     if (!valid) {
-      await supabase.from('otps').update({ attempts: otp.attempts + 1 }).eq('id', otp.id);
-      res.status(400).json({ error: 'Invalid code', attemptsRemaining: 2 - otp.attempts });
+      // Atomic increment so parallel guesses cannot exceed the attempt cap
+      const { data: newAttempts, error: rpcError } = await supabase.rpc('increment_otp_attempts', {
+        p_otp_id: otp.id,
+      });
+      let attempts = typeof newAttempts === 'number' ? newAttempts : otp.attempts + 1;
+      if (rpcError) {
+        // Fallback for databases without the SQL function (pre-migration)
+        await supabase.from('otps').update({ attempts: otp.attempts + 1 }).eq('id', otp.id);
+        attempts = otp.attempts + 1;
+      }
+      if (attempts >= 3) {
+        res.status(403).json({ error: 'Too many attempts', locked: true });
+        return;
+      }
+      res.status(400).json({ error: 'Invalid code', attemptsRemaining: Math.max(0, 3 - attempts) });
       return;
     }
 

@@ -60,8 +60,6 @@ function bitsToBytes(bits: number[]): Buffer {
 
 export async function embedLSB(imageBuffer: Buffer, payload: WatermarkPayload): Promise<Buffer> {
   const encrypted = encryptPayload(payload);
-  const lengthBits = bytesToBits(Buffer.alloc(4));
-  lengthBits.length = 0;
   const lenBuf = Buffer.alloc(4);
   lenBuf.writeUInt32BE(encrypted.length);
   const allBits = [...bytesToBits(lenBuf), ...bytesToBits(encrypted)];

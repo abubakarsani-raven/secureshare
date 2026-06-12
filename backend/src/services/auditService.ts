@@ -8,7 +8,9 @@ export async function logAudit(
   event: string,
   req: Request
 ): Promise<void> {
-  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || '';
+  // req.ip respects the trust-proxy setting; reading X-Forwarded-For directly
+  // would let clients spoof their audit-log IP with an arbitrary header.
+  const ip = req.ip || '';
   const ua = req.headers['user-agent'] || '';
   const fp = (req.headers['x-device-fingerprint'] as string) || '';
   const { device, browser, os } = parseUserAgent(ua);

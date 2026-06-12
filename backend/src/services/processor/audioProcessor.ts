@@ -9,12 +9,7 @@ import {
   getEncryptionKey,
 } from '../encryption';
 import { uploadFile } from '../storage';
-import {
-  embedPhase,
-  extractPhase,
-  floatToInt16,
-  int16ToFloat,
-} from '../watermark/audioWatermark';
+import { embedPhase, floatToInt16, int16ToFloat } from '../watermark/audioWatermark';
 import { WatermarkPayload } from '../watermark/lsbWatermark';
 
 if (ffmpegStatic) {
@@ -37,9 +32,23 @@ function transcodeToWav(inputPath: string, outputPath: string): Promise<void> {
   });
 }
 
+// Walk the RIFF chunk list to find 'data' — ffmpeg WAVs often carry extra
+// chunks (LIST/fact), so a hardcoded offset of 44 would read garbage samples.
 function wavToPcm(wavBuffer: Buffer): Float64Array {
-  const dataOffset = 44;
-  return int16ToFloat(wavBuffer.slice(dataOffset));
+  if (wavBuffer.length < 12 || wavBuffer.toString('ascii', 0, 4) !== 'RIFF') {
+    throw new Error('Not a RIFF/WAV file');
+  }
+  let offset = 12;
+  while (offset + 8 <= wavBuffer.length) {
+    const chunkId = wavBuffer.toString('ascii', offset, offset + 4);
+    const chunkSize = wavBuffer.readUInt32LE(offset + 4);
+    if (chunkId === 'data') {
+      const end = Math.min(offset + 8 + chunkSize, wavBuffer.length);
+      return int16ToFloat(wavBuffer.slice(offset + 8, end));
+    }
+    offset += 8 + chunkSize + (chunkSize % 2); // chunks are word-aligned
+  }
+  throw new Error('WAV data chunk not found');
 }
 
 function pcmToWav(samples: Float64Array): Buffer {
@@ -61,18 +70,6 @@ function pcmToWav(samples: Float64Array): Buffer {
   return Buffer.concat([header, pcm]);
 }
 
-function encodeToAac(wavPath: string, outputPath: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    ffmpeg(wavPath)
-      .audioCodec('aac')
-      .audioBitrate('128k')
-      .output(outputPath)
-      .on('end', () => resolve())
-      .on('error', reject)
-      .run();
-  });
-}
-
 export async function processAudio(
   inputPath: string,
   shareId: string,
@@ -91,16 +88,13 @@ export async function processAudio(
     const chunkCount = Math.ceil(samples.length / samplesPerChunk);
     const duration = samples.length / SAMPLE_RATE;
 
+    // Chunks stay lossless (WAV/PCM): re-encoding to a perceptual codec like
+    // AAC would destroy the phase-coded watermark embedded above.
     for (let i = 0; i < chunkCount; i++) {
       const start = i * samplesPerChunk;
       const chunk = samples.slice(start, start + samplesPerChunk);
       const chunkWav = pcmToWav(chunk);
-      const chunkWavPath = path.join(workDir, `chunk_${i}.wav`);
-      const chunkAacPath = path.join(workDir, `chunk_${i}.aac`);
-      fs.writeFileSync(chunkWavPath, chunkWav);
-      await encodeToAac(chunkWavPath, chunkAacPath);
-      const aacBuffer = fs.readFileSync(chunkAacPath);
-      const encrypted = await encryptBuffer(aacBuffer, getEncryptionKey());
+      const encrypted = await encryptBuffer(chunkWav, getEncryptionKey());
       const serialized = serializeEncrypted(encrypted);
       await uploadFile(`shares/${shareId}/audio/chunk_${i}.enc`, serialized, 'application/octet-stream');
     }

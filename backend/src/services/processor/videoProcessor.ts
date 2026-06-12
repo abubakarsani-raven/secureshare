@@ -73,33 +73,26 @@ export async function processVideo(
       .filter((f) => f.endsWith('.ts'))
       .sort();
 
-    let duration = 0;
     for (let i = 0; i < segmentFiles.length; i++) {
       const segBuffer = fs.readFileSync(path.join(workDir, segmentFiles[i]));
       const encrypted = await encryptBuffer(segBuffer, getEncryptionKey());
       const serialized = serializeEncrypted(encrypted);
       await uploadFile(`shares/${shareId}/video/segment_${i}.enc`, serialized, 'application/octet-stream');
-      duration += 4;
     }
 
     const encryptedPlaylist = await encryptBuffer(Buffer.from(playlistContent), getEncryptionKey());
     const serializedPlaylist = serializeEncrypted(encryptedPlaylist);
     await uploadFile(`shares/${shareId}/video/playlist.enc`, serializedPlaylist, 'application/octet-stream');
 
-    const metaPath = path.join(workDir, 'meta.json');
-    fs.writeFileSync(metaPath, JSON.stringify({ segmentCount: segmentFiles.length, duration }));
+    // Sum the real segment durations from the playlist instead of assuming
+    // every segment is exactly hls_time seconds.
+    let duration = 0;
+    for (const match of playlistContent.matchAll(/#EXTINF:([\d.]+)/g)) {
+      duration += parseFloat(match[1]);
+    }
 
     return { segmentCount: segmentFiles.length, duration };
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }
-}
-
-export async function getVideoDuration(inputPath: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(inputPath, (err, metadata) => {
-      if (err) reject(err);
-      else resolve(metadata.format.duration || 0);
-    });
-  });
 }

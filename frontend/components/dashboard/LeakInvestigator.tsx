@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { apiFetch } from '@/lib/api';
 import { Search, Upload } from 'lucide-react';
 
 interface ExtractResult {
@@ -27,8 +28,13 @@ export default function LeakInvestigator() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const res = await fetch('/api/admin/extract', { method: 'POST', body: formData });
-      const data = await res.json();
+      // Calls the backend with the user's JWT; results are limited server-side
+      // to watermarks belonging to this user's own shares.
+      const data = await apiFetch<ExtractResult>('/api/admin/extract', {
+        method: 'POST',
+        auth: true,
+        body: formData,
+      });
       setResult(data);
     } catch {
       setResult({ found: false });

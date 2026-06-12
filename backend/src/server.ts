@@ -17,6 +17,11 @@ import adminRoutes from './routes/admin';
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
+// Behind Railway/Vercel/etc. the first hop is the platform proxy; without this,
+// req.ip is the proxy address, rate limits lump all users into one bucket, and
+// req.protocol/host (used for playlist URLs) are wrong.
+app.set('trust proxy', 1);
+
 app.use(
   helmet({
     contentSecurityPolicy: {

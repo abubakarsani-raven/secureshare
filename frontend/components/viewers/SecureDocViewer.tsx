@@ -1,9 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { apiFetch, apiFetchBlob } from '@/lib/api';
+import { apiFetchBlob } from '@/lib/api';
 import { secureCanvas } from '@/lib/secureCanvas';
-import { embedOnCanvas } from '@/components/watermark/LSBEmbedder';
 import AntiCapture from '@/components/security/AntiCapture';
 import FocusGuard from '@/components/security/FocusGuard';
 import DevToolsDetector from '@/components/security/DevToolsDetector';
@@ -11,19 +10,15 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface Props {
   token: string;
+  // Provided by the page's single /info fetch — fetching /info here too would
+  // consume an extra view and can lock out max_views=1 shares.
+  pageCount: number;
 }
 
-export default function SecureDocViewer({ token }: Props) {
+export default function SecureDocViewer({ token, pageCount }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [pageCount, setPageCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    apiFetch<{ pageCount: number }>(`/api/view/${token}/info`, { viewSession: true })
-      .then((info) => setPageCount(info.pageCount || 0))
-      .catch(console.error);
-  }, [token]);
 
   useEffect(() => {
     if (pageCount === 0) return;
@@ -37,14 +32,9 @@ export default function SecureDocViewer({ token }: Props) {
         canvas.height = bitmap.height;
         secureCanvas(canvas);
         const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(bitmap, 0, 0);
-          embedOnCanvas(canvas, {
-            sessionId: crypto.randomUUID(),
-            timestamp: Date.now(),
-            page: currentPage,
-          });
-        }
+        // Draw only — re-embedding an LSB payload here would overwrite the
+        // server's encrypted forensic watermark carried in the same bits.
+        if (ctx) ctx.drawImage(bitmap, 0, 0);
         bitmap.close();
       })
       .finally(() => setLoading(false));

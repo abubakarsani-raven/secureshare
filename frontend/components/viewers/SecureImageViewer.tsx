@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiFetchBlob } from '@/lib/api';
 import { secureCanvas } from '@/lib/secureCanvas';
-import { embedOnCanvas } from '@/components/watermark/LSBEmbedder';
 import AntiCapture from '@/components/security/AntiCapture';
 import FocusGuard from '@/components/security/FocusGuard';
 import DevToolsDetector from '@/components/security/DevToolsDetector';
@@ -27,10 +26,9 @@ export default function SecureImageViewer({ token }: Props) {
         canvas.height = bitmap.height;
         secureCanvas(canvas);
         const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(bitmap, 0, 0);
-          embedOnCanvas(canvas, { sessionId: crypto.randomUUID(), timestamp: Date.now() });
-        }
+        // Draw only — re-embedding an LSB payload here would overwrite the
+        // server's encrypted forensic watermark carried in the same bits.
+        if (ctx) ctx.drawImage(bitmap, 0, 0);
         bitmap.close();
       })
       .finally(() => setLoading(false));

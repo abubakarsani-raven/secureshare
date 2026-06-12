@@ -40,15 +40,20 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 }
 
 export function requireViewSession(req: Request, res: Response, next: NextFunction): void {
+  // Safari's native HLS player cannot attach custom headers to playlist/segment
+  // requests, so the session JWT is also accepted as a query parameter there.
   const header = req.headers['x-view-session'];
-  if (!header || typeof header !== 'string') {
+  const query = req.query.session;
+  const token =
+    typeof header === 'string' && header ? header : typeof query === 'string' ? query : '';
+  if (!token) {
     res.status(401).json({ error: 'View session required' });
     return;
   }
   try {
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new Error('JWT_SECRET not set');
-    const payload = jwt.verify(header, secret) as ViewSessionPayload;
+    const payload = jwt.verify(token, secret) as ViewSessionPayload;
     req.viewSession = payload;
     next();
   } catch {

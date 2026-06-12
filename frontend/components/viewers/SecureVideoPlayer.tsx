@@ -23,6 +23,9 @@ export default function SecureVideoPlayer({ token }: Props) {
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // Initialize once per token. `playing` must NOT be a dependency here:
+  // re-running this effect on play/pause would destroy the HLS instance and
+  // restart playback from zero.
   useEffect(() => {
     const video = document.createElement('video');
     video.crossOrigin = 'anonymous';
@@ -31,18 +34,6 @@ export default function SecureVideoPlayer({ token }: Props) {
 
     const canvas = canvasRef.current;
     if (canvas) secureCanvas(canvas);
-
-    const drawFrame = () => {
-      const ctx = canvas?.getContext('2d');
-      if (ctx && video.readyState >= 2) {
-        if (canvas!.width !== video.videoWidth) {
-          canvas!.width = video.videoWidth || 640;
-          canvas!.height = video.videoHeight || 360;
-        }
-        ctx.drawImage(video, 0, 0, canvas!.width, canvas!.height);
-      }
-      if (playing) requestAnimationFrame(drawFrame);
-    };
 
     const init = async () => {
       const sessionToken = getViewSessionToken();
@@ -61,24 +52,29 @@ export default function SecureVideoPlayer({ token }: Props) {
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => setLoading(false));
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = playlistUrl;
+        // Safari's native HLS loader cannot send custom headers, so the
+        // session travels as a query parameter (the backend accepts both and
+        // propagates it to segment URLs when rewriting the playlist).
+        video.src = sessionToken
+          ? `${playlistUrl}?session=${encodeURIComponent(sessionToken)}`
+          : playlistUrl;
         setLoading(false);
       }
     };
 
     init();
-    if (playing) requestAnimationFrame(drawFrame);
 
     return () => {
       hlsRef.current?.destroy();
+      hlsRef.current = null;
       video.remove();
     };
-  }, [token, playing]);
+  }, [token]);
 
   const togglePlay = () => {
     const video = videoRef.current;
     if (!video) return;
-    if (playing) {
+    if (!video.paused) {
       video.pause();
       setPlaying(false);
     } else {
@@ -87,7 +83,11 @@ export default function SecureVideoPlayer({ token }: Props) {
       const canvas = canvasRef.current;
       const draw = () => {
         const ctx = canvas?.getContext('2d');
-        if (ctx && video.readyState >= 2 && canvas) {
+        if (ctx && canvas && video.readyState >= 2) {
+          if (canvas.width !== video.videoWidth && video.videoWidth > 0) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+          }
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         }
         if (!video.paused) requestAnimationFrame(draw);

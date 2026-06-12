@@ -1,4 +1,4 @@
-import { createHash, createHmac, hkdfSync, randomBytes } from 'crypto';
+import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'crypto';
 import { sha3_512 } from 'js-sha3';
 
 const MAGIC: Record<string, number[][]> = {
@@ -7,24 +7,27 @@ const MAGIC: Record<string, number[][]> = {
   png: [[0x89, 0x50, 0x4e, 0x47]],
   webp: [[0x52, 0x49, 0x46, 0x46]],
   gif: [[0x47, 0x49, 0x46, 0x38]],
-  mp4: [[0x00, 0x00, 0x00], [0x66, 0x74, 0x79, 0x70]],
-  mov: [[0x00, 0x00, 0x00], [0x66, 0x74, 0x79, 0x70]],
+  mp4: [[0x00, 0x00, 0x00]],
+  mov: [[0x00, 0x00, 0x00]],
   webm: [[0x1a, 0x45, 0xdf, 0xa3]],
   mp3: [[0x49, 0x44, 0x33], [0xff, 0xfb], [0xff, 0xf3], [0xff, 0xf2]],
   wav: [[0x52, 0x49, 0x46, 0x46]],
-  m4a: [[0x00, 0x00, 0x00], [0x66, 0x74, 0x79, 0x70]],
+  m4a: [[0x00, 0x00, 0x00]],
   ogg: [[0x4f, 0x67, 0x67, 0x53]],
 };
 
 function matchesMagic(buffer: Buffer, patterns: number[][]): boolean {
   for (const pattern of patterns) {
-    if (pattern.length === 3 && buffer.length >= 8) {
-      const ftyp = buffer.slice(4, 8);
-      if (pattern[0] === 0 && pattern[1] === 0 && pattern[2] === 0) {
-        if (ftyp[0] === 0x66 && ftyp[1] === 0x74 && ftyp[2] === 0x79 && ftyp[3] === 0x70) {
-          return true;
-        }
+    // The all-zero sentinel pattern means "ISO BMFF": require 'ftyp' at offset 4,
+    // never fall through to a prefix match (any file starting with 00 00 00 would pass).
+    if (pattern.length === 3 && pattern.every((b) => b === 0)) {
+      if (
+        buffer.length >= 8 &&
+        buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70
+      ) {
+        return true;
       }
+      continue;
     }
     let match = true;
     for (let i = 0; i < pattern.length; i++) {
@@ -88,6 +91,12 @@ export function xorBase64Fragments(fragmentB: string, fragmentA: string): string
 
 export function hmacToken(token: string, secret: string): string {
   return createHmac('sha256', secret).update(token).digest('hex');
+}
+
+export function safeCompare(a: string, b: string): boolean {
+  const bufA = createHash('sha256').update(a).digest();
+  const bufB = createHash('sha256').update(b).digest();
+  return timingSafeEqual(bufA, bufB);
 }
 
 export function parseUserAgent(ua: string): { device: string; browser: string; os: string } {

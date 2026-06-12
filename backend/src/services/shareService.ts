@@ -50,13 +50,19 @@ export async function findShareByToken(token: string): Promise<ShareRecord | nul
   return null;
 }
 
-export function isShareAccessible(share: ShareRecord): { ok: boolean; reason?: string } {
+export function isShareAccessible(
+  share: ShareRecord,
+  options?: { ignoreMaxViews?: boolean }
+): { ok: boolean; reason?: string } {
   if (share.revoked) return { ok: false, reason: 'revoked' };
   if (share.destroyed_at) return { ok: false, reason: 'destroyed' };
   if (share.expires_at && new Date(share.expires_at) < new Date()) {
     return { ok: false, reason: 'expired' };
   }
-  if (share.max_views > 0 && share.view_count >= share.max_views) {
+  // Content endpoints pass ignoreMaxViews: the view was already consumed when the
+  // session fetched /info, and page/segment requests within that session must not
+  // be locked out by their own increment.
+  if (!options?.ignoreMaxViews && share.max_views > 0 && share.view_count >= share.max_views) {
     return { ok: false, reason: 'max_views' };
   }
   return { ok: true };
@@ -64,8 +70,12 @@ export function isShareAccessible(share: ShareRecord): { ok: boolean; reason?: s
 
 export async function incrementViewCount(shareId: string): Promise<void> {
   const supabase = getSupabase();
-  const { data: share } = await supabase.from('shares').select('view_count').eq('id', shareId).single();
-  if (share) {
-    await supabase.from('shares').update({ view_count: share.view_count + 1 }).eq('id', shareId);
+  const { error } = await supabase.rpc('increment_view_count', { p_share_id: shareId });
+  if (error) {
+    // Fallback for databases without the SQL function (pre-migration)
+    const { data: share } = await supabase.from('shares').select('view_count').eq('id', shareId).single();
+    if (share) {
+      await supabase.from('shares').update({ view_count: share.view_count + 1 }).eq('id', shareId);
+    }
   }
 }

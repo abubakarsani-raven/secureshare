@@ -19,11 +19,19 @@ interface PublicInfo {
   reason: string | null;
 }
 
+interface ShareInfo {
+  type: string;
+  pageCount: number | null;
+  duration: number | null;
+  chunkCount: number | null;
+  selfDestructSeconds: number | null;
+}
+
 export default function ViewPage() {
   const params = useParams();
   const token = params.token as string;
   const [info, setInfo] = useState<PublicInfo | null>(null);
-  const [selfDestruct, setSelfDestruct] = useState<number | null>(null);
+  const [shareInfo, setShareInfo] = useState<ShareInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [verified, setVerified] = useState(false);
 
@@ -34,10 +42,12 @@ export default function ViewPage() {
       .finally(() => setLoading(false));
   }, [token]);
 
+  // /info consumes a view, so it is fetched exactly once per session here and
+  // its metadata is passed down — viewers must not re-fetch it themselves.
   useEffect(() => {
     if (verified) {
-      apiFetch<{ selfDestructSeconds: number | null }>(`/api/view/${token}/info`, { viewSession: true })
-        .then((data) => setSelfDestruct(data.selfDestructSeconds))
+      apiFetch<ShareInfo>(`/api/view/${token}/info`, { viewSession: true })
+        .then(setShareInfo)
         .catch(console.error);
     }
   }, [verified, token]);
@@ -69,11 +79,13 @@ export default function ViewPage() {
   }
 
   const viewers: Record<string, React.ReactNode> = {
-    document: <SecureDocViewer token={token} />,
+    document: <SecureDocViewer token={token} pageCount={shareInfo?.pageCount || 0} />,
     image: <SecureImageViewer token={token} />,
     video: <SecureVideoPlayer token={token} />,
-    audio: <SecureAudioPlayer token={token} />,
-    message: <SecureMessageViewer token={token} selfDestructSeconds={selfDestruct} />,
+    audio: <SecureAudioPlayer token={token} chunkCount={shareInfo?.chunkCount || 0} />,
+    message: (
+      <SecureMessageViewer token={token} selfDestructSeconds={shareInfo?.selfDestructSeconds ?? null} />
+    ),
   };
 
   return (

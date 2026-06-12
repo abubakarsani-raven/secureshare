@@ -5,6 +5,7 @@ CREATE TABLE users (
   email           TEXT UNIQUE NOT NULL,
   password_hash   TEXT NOT NULL,
   totp_secret     TEXT,
+  totp_enabled    BOOLEAN DEFAULT false,
   created_at      TIMESTAMPTZ DEFAULT now()
 );
 
@@ -82,5 +83,17 @@ CREATE POLICY "own_audit" ON audit_log FOR SELECT USING (
 CREATE POLICY "audit_insert_only" ON audit_log FOR INSERT WITH CHECK (true);
 REVOKE UPDATE ON audit_log FROM authenticated;
 REVOKE DELETE ON audit_log FROM authenticated;
+
+-- Atomic counters (avoid read-then-write races from the API)
+CREATE OR REPLACE FUNCTION increment_view_count(p_share_id UUID) RETURNS void AS $$
+  UPDATE shares SET view_count = view_count + 1 WHERE id = p_share_id;
+$$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION increment_otp_attempts(p_otp_id UUID) RETURNS int AS $$
+  UPDATE otps SET attempts = attempts + 1 WHERE id = p_otp_id RETURNING attempts;
+$$ LANGUAGE sql;
+
+-- Migration for deployments created before totp_enabled existed:
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN DEFAULT false;
 
 -- Create private storage bucket 'secureshare-files' via Supabase Dashboard (no public access)

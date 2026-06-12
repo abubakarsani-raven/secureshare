@@ -6,6 +6,7 @@ import {
   signAccessToken,
   signRefreshToken,
   verifyRefreshToken,
+  requireAuth,
 } from '../middleware/auth';
 import { registerSchema, loginSchema, refreshSchema } from '../utils/validation';
 import { authLimiter } from '../middleware/rateLimit';
@@ -26,7 +27,8 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
 
     const { data: existing } = await supabase.from('users').select('id').eq('email', email).single();
     if (existing) {
-      res.status(409).json({ error: 'Email already registered' });
+      // Deliberately generic to avoid confirming which emails are registered
+      res.status(400).json({ error: 'Unable to register with this email' });
       return;
     }
 
@@ -84,7 +86,9 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
       return;
     }
 
-    if (user.totp_secret) {
+    // Only enforce TOTP once the user has confirmed their authenticator setup;
+    // otherwise a user who never scanned the QR would be locked out forever.
+    if (user.totp_secret && user.totp_enabled) {
       if (!totpCode) {
         res.status(401).json({ error: 'TOTP code required', requiresTotp: true });
         return;
@@ -102,6 +106,40 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
     res.json({ accessToken, refreshToken });
   } catch (err) {
     logger.error('Login error', { error: String(err) });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/totp/confirm', authLimiter, requireAuth, async (req: Request, res: Response) => {
+  try {
+    const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+    if (!/^\d{6}$/.test(code)) {
+      res.status(400).json({ error: 'A 6-digit code is required' });
+      return;
+    }
+
+    const supabase = getSupabase();
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, totp_secret, totp_enabled')
+      .eq('id', req.user!.userId)
+      .single();
+
+    if (!user?.totp_secret) {
+      res.status(400).json({ error: 'TOTP not set up' });
+      return;
+    }
+
+    const valid = authenticator.verify({ token: code, secret: user.totp_secret });
+    if (!valid) {
+      res.status(400).json({ error: 'Invalid TOTP code' });
+      return;
+    }
+
+    await supabase.from('users').update({ totp_enabled: true }).eq('id', user.id);
+    res.json({ enabled: true });
+  } catch (err) {
+    logger.error('TOTP confirm error', { error: String(err) });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
