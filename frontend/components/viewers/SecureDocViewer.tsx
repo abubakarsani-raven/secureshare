@@ -39,6 +39,9 @@ export default function SecureDocViewer({ token, pageCount, watermark }: Props) 
         if (ctx) ctx.drawImage(bitmap, 0, 0);
         bitmap.close();
       })
+      .catch(() => {
+        // Share may have been revoked/expired mid-view — fail quietly.
+      })
       .finally(() => setLoading(false));
   }, [token, currentPage, pageCount]);
 

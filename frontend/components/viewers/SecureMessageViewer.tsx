@@ -24,10 +24,23 @@ export default function SecureMessageViewer({ token, selfDestructSeconds, waterm
 
   useEffect(() => {
     const load = async () => {
-      const data = await apiFetch<{ ciphertext: string; keyFragmentB: string }>(
-        `/api/view/${token}/message`,
-        { viewSession: true }
-      );
+      let data: { ciphertext: string; keyFragmentB: string };
+      try {
+        data = await apiFetch<{ ciphertext: string; keyFragmentB: string }>(
+          `/api/view/${token}/message`,
+          { viewSession: true }
+        );
+      } catch (err) {
+        // The message may already be gone (self-destructed) or otherwise
+        // inaccessible — surface that instead of throwing an unhandled error.
+        const msg = err instanceof Error ? err.message : '';
+        if (msg === 'destroyed') {
+          setDestroyed(true);
+        } else {
+          drawError('This message is no longer available.');
+        }
+        return;
+      }
 
       const parsed = JSON.parse(data.ciphertext);
       const hash = typeof window !== 'undefined' ? window.location.hash : '';
