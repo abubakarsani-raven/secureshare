@@ -81,11 +81,10 @@ export default function ViewPage() {
     );
   }
 
-  // Per-recipient forensic label baked into every rendered view.
-  const watermarkLabel = `${info.recipientName} · ${token.slice(0, 8)} · ${new Date()
-    .toISOString()
-    .slice(0, 16)
-    .replace('T', ' ')}`;
+  // Per-recipient forensic label baked into every rendered view. Kept short
+  // (recipient + share id) so each tiled instance is large enough to read off a
+  // revealed screenshot; the exact view time lives in the audit log.
+  const watermarkLabel = `${info.recipientName} · ${token.slice(0, 8)}`;
 
   const viewers: Record<string, React.ReactNode> = {
     document: (

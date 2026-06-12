@@ -39,16 +39,23 @@ export default function GpuWatermark({ label, opacity = 0.1 }: Props) {
     const tctx = tile.getContext('2d');
     if (!tctx) return;
     tctx.clearRect(0, 0, TILE, TILE);
-    tctx.font = `600 ${22 * dpr}px -apple-system, BlinkMacSystemFont, sans-serif`;
     tctx.textAlign = 'center';
     tctx.textBaseline = 'middle';
+    // Scale the font so the label spans ~92% of the tile width — this makes the
+    // text as large as possible (legible once revealed) regardless of label
+    // length, rather than a fixed size that shrinks for long names.
+    let fontSize = 48;
+    tctx.font = `700 ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    const measured = tctx.measureText(label).width || TILE;
+    fontSize = Math.max(14, Math.min(64, (fontSize * (TILE * 0.92)) / measured));
+    tctx.font = `700 ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
     // Draw a white halo under dark text so the label stays legible on both
     // light backgrounds (messages/documents) and dark ones (video/photos).
     const draw = (cx: number, cy: number) => {
-      tctx.lineWidth = 5;
+      tctx.lineWidth = Math.max(4, fontSize * 0.12);
       tctx.strokeStyle = 'rgba(255,255,255,0.85)';
       tctx.strokeText(label, cx, cy);
-      tctx.fillStyle = 'rgba(15,15,15,0.9)';
+      tctx.fillStyle = 'rgba(15,15,15,0.92)';
       tctx.fillText(label, cx, cy);
     };
     draw(TILE / 2, TILE / 4);
@@ -107,6 +114,10 @@ export default function GpuWatermark({ label, opacity = 0.1 }: Props) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
+    // Flip Y on upload: the 2D canvas tile has a top-left origin while WebGL
+    // textures sample from bottom-left, so without this the label renders
+    // upside-down.
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tile);
 
     gl.enable(gl.BLEND);
@@ -128,8 +139,9 @@ export default function GpuWatermark({ label, opacity = 0.1 }: Props) {
       gl.viewport(0, 0, canvas.width, canvas.height);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
-      // One tile per ~190px so the label repeats densely across any size.
-      gl.uniform2f(uRepeat, w / 190, h / 190);
+      // One tile per ~330px so each label instance is large enough to read
+      // when the watermark is later revealed from a leaked screenshot.
+      gl.uniform2f(uRepeat, w / 330, h / 330);
       gl.uniform1f(uOpacity, opacity);
       gl.uniform1f(uAngle, -0.5); // ~ -28 degrees
       gl.uniform1i(gl.getUniformLocation(prog, 'tex'), 0);
