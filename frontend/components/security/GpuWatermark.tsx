@@ -15,7 +15,7 @@ interface Props {
 // rather than on the 2D canvas CPU path. The layer is pointer-events:none and
 // sits above the content; because it is part of the rendered pixels it survives
 // screenshots, unlike invisible LSB/DCT marks.
-export default function GpuWatermark({ label, opacity = 0.28 }: Props) {
+export default function GpuWatermark({ label, opacity = 0.5 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -26,24 +26,26 @@ export default function GpuWatermark({ label, opacity = 0.28 }: Props) {
     if (!gl) return; // WebGL unavailable — caller may also keep a CSS fallback
 
     // --- rasterize the repeating tile (text glyphs need a 2D raster pass) ---
+    // The texture MUST be power-of-two: WebGL1 cannot REPEAT-wrap an NPOT
+    // texture (it becomes "incomplete" and samples as transparent).
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const TILE = 512;
     const tile = document.createElement('canvas');
-    const TILE = 320;
-    tile.width = TILE * dpr;
-    tile.height = TILE * dpr;
+    tile.width = TILE;
+    tile.height = TILE;
     const tctx = tile.getContext('2d');
     if (!tctx) return;
-    tctx.scale(dpr, dpr);
     tctx.clearRect(0, 0, TILE, TILE);
-    tctx.font = '600 16px -apple-system, BlinkMacSystemFont, sans-serif';
+    tctx.font = `600 ${22 * dpr}px -apple-system, BlinkMacSystemFont, sans-serif`;
     tctx.textAlign = 'center';
     tctx.textBaseline = 'middle';
-    // Draw twice per tile (offset) so the diagonal pattern reads as continuous.
+    // Draw a white halo under dark text so the label stays legible on both
+    // light backgrounds (messages/documents) and dark ones (video/photos).
     const draw = (cx: number, cy: number) => {
-      tctx.lineWidth = 3;
-      tctx.strokeStyle = 'rgba(0,0,0,0.35)';
+      tctx.lineWidth = 5;
+      tctx.strokeStyle = 'rgba(255,255,255,0.85)';
       tctx.strokeText(label, cx, cy);
-      tctx.fillStyle = 'rgba(255,255,255,0.85)';
+      tctx.fillStyle = 'rgba(15,15,15,0.9)';
       tctx.fillText(label, cx, cy);
     };
     draw(TILE / 2, TILE / 4);
