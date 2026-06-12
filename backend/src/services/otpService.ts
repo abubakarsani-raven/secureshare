@@ -18,12 +18,24 @@ export function generateOTP(): string {
   return Array.from({ length: 6 }, () => randomInt(0, 10).toString()).join('');
 }
 
+function emailDisabled(): boolean {
+  const key = process.env.RESEND_API_KEY;
+  return !key || key.includes('placeholder');
+}
+
 export async function sendOTP(
   email: string,
   code: string,
   recipientName: string,
   shareType: string
 ): Promise<void> {
+  // Dev fallback: without a real Resend key, surface the code in the terminal
+  // instead of silently "sending" nothing.
+  if (emailDisabled()) {
+    logger.warn(`[DEV ONLY] Email disabled (no RESEND_API_KEY) — OTP code for ${email}: ${code}`);
+    return;
+  }
+
   const from = process.env.RESEND_FROM_EMAIL || 'noreply@secureshare.app';
   const html = `
 <!DOCTYPE html>
@@ -47,12 +59,18 @@ export async function sendOTP(
 </html>`;
 
   try {
-    await getResend().emails.send({
+    // The Resend SDK reports API failures via the returned error field rather
+    // than throwing — ignoring it means "sent" responses for mail that never left.
+    const { error } = await getResend().emails.send({
       from,
       to: email,
       subject: 'Your SecureShare verification code',
       html,
     });
+    if (error) {
+      logger.error('Resend rejected OTP email', { email, error: error.message });
+      throw new Error('Failed to send verification email');
+    }
   } catch (err) {
     logger.error('Failed to send OTP email', { email, error: String(err) });
     throw new Error('Failed to send verification email');

@@ -1,6 +1,13 @@
-import { createCanvas, Canvas, SKRSContext2D } from '@napi-rs/canvas';
+import { createCanvas, Canvas, SKRSContext2D, DOMMatrix, Path2D, ImageData } from '@napi-rs/canvas';
 import sharp from 'sharp';
 import type { PDFDocumentProxy, CanvasFactory } from 'pdfjs-dist/legacy/build/pdf.js';
+
+// pdf.js expects these browser globals; without them it tries to require the
+// optional 'canvas' package, warns, and may render geometry/images incorrectly.
+const g = globalThis as Record<string, unknown>;
+g.DOMMatrix ??= DOMMatrix;
+g.Path2D ??= Path2D;
+g.ImageData ??= ImageData;
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfjs = require('pdfjs-dist/legacy/build/pdf.js') as typeof import('pdfjs-dist/legacy/build/pdf.js');
