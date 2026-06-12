@@ -1,9 +1,24 @@
 import { getFingerprint } from './fingerprint';
+import type { ViewerGeo } from './geolocation';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 let accessToken: string | null = null;
 let viewSessionToken: string | null = null;
+let viewerGeo: ViewerGeo | null = null;
+
+export function setViewerGeo(geo: ViewerGeo | null): void {
+  viewerGeo = geo;
+}
+
+export function getViewerGeoHeaders(): Record<string, string> {
+  if (!viewerGeo) return {};
+  return {
+    'X-Geo-Lat': String(viewerGeo.lat),
+    'X-Geo-Lng': String(viewerGeo.lng),
+    'X-Geo-Accuracy': String(viewerGeo.accuracy),
+  };
+}
 
 export function setAccessToken(token: string | null): void {
   accessToken = token;
@@ -42,6 +57,7 @@ export async function apiFetch<T = unknown>(path: string, options: FetchOptions 
 
   if (viewSession && viewSessionToken) {
     headers['X-View-Session'] = viewSessionToken;
+    Object.assign(headers, getViewerGeoHeaders());
   }
 
   if (typeof window !== 'undefined') {
@@ -68,6 +84,7 @@ export async function apiFetchBlob(path: string, viewSession = true): Promise<Bl
   const headers: Record<string, string> = {};
   if (viewSession && viewSessionToken) {
     headers['X-View-Session'] = viewSessionToken;
+    Object.assign(headers, getViewerGeoHeaders());
   }
   headers['X-Device-Fingerprint'] = await getFingerprint();
 

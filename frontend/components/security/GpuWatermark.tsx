@@ -5,7 +5,9 @@ import { useEffect, useRef } from 'react';
 interface Props {
   // Identifying text baked into every view (recipient + share id + time).
   label: string;
-  // 0..1 overall opacity of the watermark layer.
+  // 0..1 overall opacity. Defaults to a faint forensic level: barely
+  // perceptible during normal viewing, but recoverable from a leaked
+  // screenshot by boosting contrast.
   opacity?: number;
 }
 
@@ -14,8 +16,9 @@ interface Props {
 // it across the whole surface — so tiling/rotation/compositing run on the GPU
 // rather than on the 2D canvas CPU path. The layer is pointer-events:none and
 // sits above the content; because it is part of the rendered pixels it survives
-// screenshots, unlike invisible LSB/DCT marks.
-export default function GpuWatermark({ label, opacity = 0.5 }: Props) {
+// screenshots, unlike invisible LSB/DCT marks. It carries a light+dark pair so
+// the mark is recoverable on both light and dark backgrounds.
+export default function GpuWatermark({ label, opacity = 0.08 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {

@@ -66,6 +66,9 @@ CREATE TABLE audit_log (
   browser         TEXT,
   os              TEXT,
   device_fp       TEXT,
+  latitude        DOUBLE PRECISION,
+  longitude       DOUBLE PRECISION,
+  geo_accuracy    DOUBLE PRECISION,
   timestamp       TIMESTAMPTZ DEFAULT now()
 );
 
@@ -95,5 +98,10 @@ $$ LANGUAGE sql;
 
 -- Migration for deployments created before totp_enabled existed:
 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN DEFAULT false;
+
+-- Migration for precise viewer geolocation columns:
+-- ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
+-- ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
+-- ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS geo_accuracy DOUBLE PRECISION;
 
 -- Create private storage bucket 'secureshare-files' via Supabase Dashboard (no public access)

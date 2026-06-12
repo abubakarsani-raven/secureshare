@@ -12,6 +12,9 @@ interface AuditEntry {
   device: string;
   browser: string;
   os: string;
+  latitude: number | null;
+  longitude: number | null;
+  geo_accuracy: number | null;
   timestamp: string;
 }
 
@@ -35,7 +38,8 @@ export default function AuditLog({ shareId }: { shareId: string }) {
         <thead>
           <tr className="text-left text-zinc-500 border-b">
             <th className="pb-2 pr-4">Event</th>
-            <th className="pb-2 pr-4">Location</th>
+            <th className="pb-2 pr-4">Location (IP)</th>
+            <th className="pb-2 pr-4">Precise location</th>
             <th className="pb-2 pr-4">Device</th>
             <th className="pb-2">Time</th>
           </tr>
@@ -45,6 +49,23 @@ export default function AuditLog({ shareId }: { shareId: string }) {
             <tr key={log.id} className="border-b border-zinc-100">
               <td className="py-2 pr-4 font-medium">{log.event}</td>
               <td className="py-2 pr-4">{log.city}, {log.country}</td>
+              <td className="py-2 pr-4">
+                {log.latitude != null && log.longitude != null ? (
+                  <a
+                    href={`https://www.google.com/maps?q=${log.latitude},${log.longitude}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    {log.latitude.toFixed(5)}, {log.longitude.toFixed(5)}
+                    {log.geo_accuracy != null && (
+                      <span className="text-zinc-400"> (±{Math.round(log.geo_accuracy)}m)</span>
+                    )}
+                  </a>
+                ) : (
+                  <span className="text-zinc-400">—</span>
+                )}
+              </td>
               <td className="py-2 pr-4">{log.browser} / {log.os}</td>
               <td className="py-2">{new Date(log.timestamp).toLocaleString()}</td>
             </tr>

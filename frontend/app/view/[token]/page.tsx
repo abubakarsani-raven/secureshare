@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import OTPGate from '@/components/security/OTPGate';
+import GeoGate from '@/components/security/GeoGate';
 import SecureDocViewer from '@/components/viewers/SecureDocViewer';
 import SecureImageViewer from '@/components/viewers/SecureImageViewer';
 import SecureVideoPlayer from '@/components/viewers/SecureVideoPlayer';
@@ -34,6 +35,7 @@ export default function ViewPage() {
   const [shareInfo, setShareInfo] = useState<ShareInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [verified, setVerified] = useState(false);
+  const [geoReady, setGeoReady] = useState(false);
 
   useEffect(() => {
     apiFetch<PublicInfo>(`/api/view/${token}/public-info`)
@@ -42,15 +44,16 @@ export default function ViewPage() {
       .finally(() => setLoading(false));
   }, [token]);
 
-  // /info consumes a view, so it is fetched exactly once per session here and
-  // its metadata is passed down — viewers must not re-fetch it themselves.
+  // /info consumes a view and is the audited "content_viewed" event, so it is
+  // fetched exactly once — only after location is granted, so the coordinates
+  // travel with it into the audit log. Its metadata is passed to the viewers.
   useEffect(() => {
-    if (verified) {
+    if (verified && geoReady) {
       apiFetch<ShareInfo>(`/api/view/${token}/info`, { viewSession: true })
         .then(setShareInfo)
         .catch(console.error);
     }
-  }, [verified, token]);
+  }, [verified, geoReady, token]);
 
   if (loading) {
     return (
@@ -111,7 +114,7 @@ export default function ViewPage() {
         </div>
 
         <OTPGate token={token} otpRequired={info.otpRequired} onVerified={() => setVerified(true)}>
-          {viewers[info.type]}
+          <GeoGate onLocated={() => setGeoReady(true)}>{viewers[info.type]}</GeoGate>
         </OTPGate>
       </div>
     </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { getViewSessionToken } from '@/lib/api';
+import { getViewSessionToken, getViewerGeoHeaders } from '@/lib/api';
 import { getFingerprint } from '@/lib/fingerprint';
 import { secureCanvas } from '@/lib/secureCanvas';
 import AntiCapture from '@/components/security/AntiCapture';
@@ -47,6 +47,9 @@ export default function SecureVideoPlayer({ token, watermark }: Props) {
           xhrSetup(xhr) {
             if (sessionToken) xhr.setRequestHeader('X-View-Session', sessionToken);
             xhr.setRequestHeader('X-Device-Fingerprint', fp);
+            for (const [k, v] of Object.entries(getViewerGeoHeaders())) {
+              xhr.setRequestHeader(k, v);
+            }
           },
         });
         hlsRef.current = hls;
