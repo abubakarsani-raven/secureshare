@@ -8,6 +8,9 @@ export interface WatermarkPayload {
   sessionId: string;
   timestamp: number;
   email: string;
+  // Tardos collusion-secure fingerprint codeword (base64), embedded so a leaked
+  // — even colluded — copy can be traced to a recipient.
+  fp?: string;
 }
 
 function deriveWatermarkKey(): Buffer {

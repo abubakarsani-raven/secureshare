@@ -33,6 +33,7 @@ CREATE TABLE shares (
   time_window_start     TIME,
   time_window_end       TIME,
   watermark_seed        TEXT NOT NULL,
+  fingerprint           TEXT,
   self_destruct_seconds INT,
   destroyed_at          TIMESTAMPTZ,
   page_count            INT,
@@ -44,6 +45,17 @@ CREATE TABLE shares (
 CREATE INDEX idx_shares_token_lookup ON shares(token_lookup);
 CREATE INDEX idx_shares_sender_id ON shares(sender_id);
 CREATE INDEX idx_shares_batch_id ON shares(batch_id);
+
+-- One row per multi-recipient upload, holding the secret Tardos bias vector
+-- used to score collusion-secure fingerprints. Never exposed to recipients.
+CREATE TABLE campaigns (
+  batch_id      UUID PRIMARY KEY,
+  sender_id     UUID REFERENCES users(id) ON DELETE CASCADE,
+  code_length   INT NOT NULL,
+  max_colluders INT NOT NULL,
+  bias          TEXT NOT NULL,
+  created_at    TIMESTAMPTZ DEFAULT now()
+);
 
 CREATE TABLE otps (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -109,5 +121,14 @@ $$ LANGUAGE sql;
 -- Migration for campaign grouping (one upload -> many recipient copies):
 -- ALTER TABLE shares ADD COLUMN IF NOT EXISTS batch_id UUID;
 -- CREATE INDEX IF NOT EXISTS idx_shares_batch_id ON shares(batch_id);
+
+-- Migration for Tardos collusion-secure fingerprinting:
+-- ALTER TABLE shares ADD COLUMN IF NOT EXISTS fingerprint TEXT;
+-- CREATE TABLE IF NOT EXISTS campaigns (
+--   batch_id UUID PRIMARY KEY,
+--   sender_id UUID REFERENCES users(id) ON DELETE CASCADE,
+--   code_length INT NOT NULL, max_colluders INT NOT NULL,
+--   bias TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT now()
+-- );
 
 -- Create private storage bucket 'secureshare-files' via Supabase Dashboard (no public access)

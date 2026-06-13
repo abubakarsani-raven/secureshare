@@ -23,6 +23,8 @@ import { processVideo } from '../services/processor/videoProcessor';
 import { processAudio } from '../services/processor/audioProcessor';
 import { logAudit } from '../services/auditService';
 import { WatermarkPayload } from '../services/watermark/lsbWatermark';
+import { buildCampaignFingerprints, saveCampaign } from '../services/fingerprint/fingerprintService';
+import { packBits } from '../services/fingerprint/tardos';
 import { logger } from '../utils/logger';
 
 const router = Router();
@@ -81,10 +83,13 @@ async function createShareRecord(
     ...fields,
   };
   let { data, error } = await supabase.from('shares').insert(base).select('id').single();
-  // Retry without batch_id for deployments that haven't run the campaign migration.
-  if (error && 'batch_id' in base) {
-    const { batch_id: _omit, ...withoutBatch } = base;
-    ({ data, error } = await supabase.from('shares').insert(withoutBatch).select('id').single());
+  // Retry without the newer columns for deployments that haven't run the
+  // campaign / fingerprint migrations yet.
+  if (error) {
+    const legacy: Record<string, unknown> = { ...base };
+    delete legacy.batch_id;
+    delete legacy.fingerprint;
+    ({ data, error } = await supabase.from('shares').insert(legacy).select('id').single());
   }
   if (error || !data) throw new Error('Failed to create share');
   return data.id;
@@ -174,15 +179,23 @@ async function createForEachRecipient(
   // One batch id ties all per-recipient copies of this upload together so the
   // dashboard can show them as a single campaign.
   const batchId = randomUUID();
+  // Collusion-secure fingerprints: each recipient's copy carries a distinct
+  // Tardos codeword so even a colluded leak traces back to a real recipient.
+  const fingerprints = buildCampaignFingerprints(recipients.length);
+  await saveCampaign(batchId, req.user!.userId, fingerprints);
   try {
-    for (const r of recipients) {
+    for (let i = 0; i < recipients.length; i++) {
+      const r = recipients[i];
       const token = generateToken();
       const shareId = randomUUID();
       shareIds.push(shareId);
+      const codeword = packBits(fingerprints.codewords[i]);
       const payload = watermarkPayload(shareId, r.email);
+      payload.fp = codeword;
       const extra = await process(shareId, payload, r.email);
       await createShareRecord(req.user!.userId, token, type, shareId, {
         batch_id: batchId,
+        fingerprint: codeword,
         ...recipientFields(r, options),
         ...extra,
       });

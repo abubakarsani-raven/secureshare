@@ -31,6 +31,11 @@ interface ExtractResult {
   // OCR'd watermark text and the best fuzzy match against the user's own shares.
   ocrText?: string;
   match?: ShareMatch | null;
+  // Collusion-secure (Tardos) accusation across the whole campaign.
+  collusion?: {
+    threshold: number;
+    ranked: { recipientName: string; emailHint: string; shareId: string; score: number; accused: boolean }[];
+  } | null;
 }
 
 export default function LeakInvestigator() {
@@ -122,6 +127,39 @@ export default function LeakInvestigator() {
               label off the revealed image below; embedded watermarks need the original file (not a
               screenshot).
             </p>
+          )}
+
+          {result.collusion && result.collusion.ranked.length > 1 && (
+            <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+              <div className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 text-sm font-medium">
+                Collusion-secure fingerprint scores
+                <span className="ml-1 font-normal text-zinc-500 dark:text-zinc-400">
+                  (accuse above {Math.round(result.collusion.threshold)})
+                </span>
+              </div>
+              <table className="w-full text-sm">
+                <tbody>
+                  {result.collusion.ranked.slice(0, 6).map((r) => (
+                    <tr key={r.shareId} className="border-t dark:border-zinc-700">
+                      <td className="px-3 py-1.5">{r.recipientName}</td>
+                      <td className="px-3 py-1.5 text-zinc-500 dark:text-zinc-400">{r.emailHint}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{Math.round(r.score)}</td>
+                      <td className="px-3 py-1.5 text-right">
+                        {r.accused && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                            implicated
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="px-3 py-2 text-xs text-zinc-500 dark:text-zinc-400">
+                Scores hold up even if recipients colluded to splice a mixed copy — at least one true
+                leaker still scores above the threshold.
+              </p>
+            </div>
           )}
 
           {result.reveal && (

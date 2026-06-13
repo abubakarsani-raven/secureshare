@@ -7,6 +7,7 @@ import { extractWatermark } from '../services/watermark/extractor';
 import { AuthPayload } from '../middleware/auth';
 import { getSupabase } from '../services/storage';
 import { safeCompare } from '../utils/helpers';
+import { traceLeak, TraceResult } from '../services/fingerprint/fingerprintService';
 import { logger } from '../utils/logger';
 
 const router = Router();
@@ -168,11 +169,26 @@ router.post('/extract', requireAdminOrUser, upload.single('file'), async (req: R
     const result = await extractWatermark(req.file.buffer);
 
     let match: ShareMatch | null = null;
+    let collusion: { threshold: number; ranked: TraceResult[] } | null = null;
 
     // Preferred path: an embedded LSB/DCT watermark (image/PDF originals) carries
     // the exact share id, so we can identify the recipient with certainty.
     if (result.found && result.payload) {
       match = await matchByShareId(result.payload.documentId, req.user?.userId);
+
+      // If the copy carries a Tardos fingerprint, score the whole campaign — this
+      // still names a real leaker even if several recipients colluded to splice
+      // a mixed copy (which a plain per-recipient watermark cannot do).
+      if (result.payload.fp && match) {
+        const { data: share } = await getSupabase()
+          .from('shares')
+          .select('batch_id')
+          .eq('id', result.payload.documentId)
+          .single();
+        if (share?.batch_id) {
+          collusion = await traceLeak(share.batch_id, result.payload.fp, req.user?.userId);
+        }
+      }
     }
 
     // Fallback path: a screenshot has no embedded mark, but the faint on-screen
@@ -200,6 +216,7 @@ router.post('/extract', requireAdminOrUser, upload.single('file'), async (req: R
       reveal,
       ocrText,
       match,
+      collusion,
     });
   } catch (err) {
     logger.error('Extract error', { error: String(err) });
