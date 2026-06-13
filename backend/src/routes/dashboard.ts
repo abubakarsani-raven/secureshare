@@ -24,6 +24,7 @@ router.get('/shares', requireAuth, async (req: Request, res: Response) => {
     const result = await Promise.all(
       (shares || []).map(async (s) => ({
         id: s.id,
+        batchId: s.batch_id,
         type: s.type,
         recipientName: s.recipient_name,
         emailHint: s.recipient_email_hint,

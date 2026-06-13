@@ -29,14 +29,14 @@ export default function AuditLog({ shareId }: { shareId: string }) {
       .finally(() => setLoading(false));
   }, [shareId]);
 
-  if (loading) return <p className="text-sm text-zinc-500">Loading audit log...</p>;
-  if (logs.length === 0) return <p className="text-sm text-zinc-500">No activity recorded.</p>;
+  if (loading) return <p className="text-sm text-zinc-500 dark:text-zinc-400">Loading audit log...</p>;
+  if (logs.length === 0) return <p className="text-sm text-zinc-500 dark:text-zinc-400">No activity recorded.</p>;
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-zinc-500 border-b">
+          <tr className="text-left text-zinc-500 dark:text-zinc-400 border-b dark:border-zinc-700">
             <th className="pb-2 pr-4">Event</th>
             <th className="pb-2 pr-4">Location (IP)</th>
             <th className="pb-2 pr-4">Precise location</th>
@@ -46,7 +46,7 @@ export default function AuditLog({ shareId }: { shareId: string }) {
         </thead>
         <tbody>
           {logs.map((log) => (
-            <tr key={log.id} className="border-b border-zinc-100">
+            <tr key={log.id} className="border-b border-zinc-100 dark:border-zinc-800">
               <td className="py-2 pr-4 font-medium">{log.event}</td>
               <td className="py-2 pr-4">{log.city}, {log.country}</td>
               <td className="py-2 pr-4">

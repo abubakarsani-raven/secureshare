@@ -61,12 +61,12 @@ export default function LeakInvestigator() {
   };
 
   return (
-    <div className="bg-white border rounded-xl p-6">
+    <div className="bg-white border rounded-xl p-6 dark:bg-zinc-900 dark:border-zinc-800">
       <div className="flex items-center gap-3 mb-4">
         <Search className="w-6 h-6 text-primary" />
         <div>
           <h3 className="font-semibold">Leak Investigator</h3>
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
             Upload a leaked copy or screenshot to identify which recipient it came from
           </p>
         </div>
@@ -88,9 +88,9 @@ export default function LeakInvestigator() {
         </button>
       </div>
       {result && (
-        <div className="mt-4 p-4 rounded-lg bg-zinc-50 space-y-4">
+        <div className="mt-4 p-4 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 space-y-4">
           {result.match ? (
-            <div className="p-4 rounded-lg bg-green-50 border border-green-200">
+            <div className="p-4 rounded-lg bg-green-50 border border-green-200 dark:bg-green-900/20 dark:border-green-800">
               <div className="flex items-center justify-between gap-2">
                 <p className="font-semibold text-green-800">
                   Leak traced to: {result.match.recipientName}

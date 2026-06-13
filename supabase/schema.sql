@@ -12,6 +12,7 @@ CREATE TABLE users (
 CREATE TABLE shares (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   sender_id             UUID REFERENCES users(id) ON DELETE CASCADE,
+  batch_id              UUID,
   token_hash            TEXT UNIQUE NOT NULL,
   token_lookup          TEXT,
   type                  TEXT NOT NULL CHECK (type IN ('document','image','video','audio','message')),
@@ -42,6 +43,7 @@ CREATE TABLE shares (
 
 CREATE INDEX idx_shares_token_lookup ON shares(token_lookup);
 CREATE INDEX idx_shares_sender_id ON shares(sender_id);
+CREATE INDEX idx_shares_batch_id ON shares(batch_id);
 
 CREATE TABLE otps (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -103,5 +105,9 @@ $$ LANGUAGE sql;
 -- ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
 -- ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
 -- ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS geo_accuracy DOUBLE PRECISION;
+
+-- Migration for campaign grouping (one upload -> many recipient copies):
+-- ALTER TABLE shares ADD COLUMN IF NOT EXISTS batch_id UUID;
+-- CREATE INDEX IF NOT EXISTS idx_shares_batch_id ON shares(batch_id);
 
 -- Create private storage bucket 'secureshare-files' via Supabase Dashboard (no public access)

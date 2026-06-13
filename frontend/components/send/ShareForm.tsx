@@ -153,15 +153,15 @@ export default function ShareForm({ type, accept, fileLabel, showSelfDestruct }:
         </div>
 
         {sharesWithQr.map((s) => (
-          <div key={s.token} className="p-4 bg-white border rounded-xl">
+          <div key={s.token} className="p-4 bg-white border rounded-xl dark:bg-zinc-900 dark:border-zinc-800">
             <div className="flex items-center justify-between gap-3 mb-2">
               <div className="min-w-0">
                 <p className="font-medium truncate">{s.recipientName}</p>
-                <p className="text-xs text-zinc-500 truncate">{s.recipientEmail}</p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">{s.recipientEmail}</p>
               </div>
               {s.qr && <img src={s.qr} alt="QR" className="w-14 h-14 shrink-0" />}
             </div>
-            <div className="bg-zinc-100 p-2 rounded text-xs break-all mb-2">{s.shareUrl}</div>
+            <div className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded text-xs break-all mb-2">{s.shareUrl}</div>
             <div className="flex gap-2">
               <button
                 onClick={() => copyLink(s)}
@@ -199,14 +199,14 @@ export default function ShareForm({ type, accept, fileLabel, showSelfDestruct }:
                 value={r.name}
                 onChange={(e) => updateRecipient(i, 'name', e.target.value)}
                 placeholder="Name"
-                className="w-2/5 px-3 py-2 border rounded-lg text-sm"
+                className="w-2/5 px-3 py-2 border rounded-lg text-sm dark:bg-zinc-800 dark:border-zinc-700"
               />
               <input
                 type="email"
                 value={r.email}
                 onChange={(e) => updateRecipient(i, 'email', e.target.value)}
                 placeholder="email@example.com"
-                className="flex-1 px-3 py-2 border rounded-lg text-sm"
+                className="flex-1 px-3 py-2 border rounded-lg text-sm dark:bg-zinc-800 dark:border-zinc-700"
               />
               {recipients.length > 1 && (
                 <button
@@ -238,7 +238,7 @@ export default function ShareForm({ type, accept, fileLabel, showSelfDestruct }:
             onChange={(e) => setMessage(e.target.value.slice(0, 10000))}
             required
             rows={6}
-            className="w-full px-4 py-2 border rounded-lg"
+            className="w-full px-4 py-2 border rounded-lg dark:bg-zinc-800 dark:border-zinc-700"
           />
         </div>
       ) : (
@@ -257,7 +257,7 @@ export default function ShareForm({ type, accept, fileLabel, showSelfDestruct }:
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium mb-1">Expiry</label>
-          <select value={expiry} onChange={(e) => setExpiry(e.target.value)} className="w-full px-4 py-2 border rounded-lg">
+          <select value={expiry} onChange={(e) => setExpiry(e.target.value)} className="w-full px-4 py-2 border rounded-lg dark:bg-zinc-800 dark:border-zinc-700">
             <option value="1hr">1 hour</option>
             <option value="6hr">6 hours</option>
             <option value="24hr">24 hours</option>
@@ -268,7 +268,7 @@ export default function ShareForm({ type, accept, fileLabel, showSelfDestruct }:
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Max views (per recipient)</label>
-          <select value={maxViews} onChange={(e) => setMaxViews(e.target.value)} className="w-full px-4 py-2 border rounded-lg">
+          <select value={maxViews} onChange={(e) => setMaxViews(e.target.value)} className="w-full px-4 py-2 border rounded-lg dark:bg-zinc-800 dark:border-zinc-700">
             <option value="1">1</option>
             <option value="3">3</option>
             <option value="5">5</option>
@@ -281,7 +281,7 @@ export default function ShareForm({ type, accept, fileLabel, showSelfDestruct }:
       {showSelfDestruct && (
         <div>
           <label className="block text-sm font-medium mb-1">Self-destruct after viewing</label>
-          <select value={selfDestruct} onChange={(e) => setSelfDestruct(e.target.value)} className="w-full px-4 py-2 border rounded-lg">
+          <select value={selfDestruct} onChange={(e) => setSelfDestruct(e.target.value)} className="w-full px-4 py-2 border rounded-lg dark:bg-zinc-800 dark:border-zinc-700">
             <option value="10">10 seconds</option>
             <option value="30">30 seconds</option>
             <option value="60">1 minute</option>

@@ -70,20 +70,22 @@ async function createShareRecord(
   const supabase = getSupabase();
   const tokenHash = await hashToken(token);
   const lookup = tokenLookup(token);
-  const { data, error } = await supabase
-    .from('shares')
-    .insert({
-      id: shareId,
-      sender_id: userId,
-      token_hash: tokenHash,
-      token_lookup: lookup,
-      type,
-      watermark_seed: generateWatermarkSeed(),
-      storage_path: `shares/${shareId}`,
-      ...fields,
-    })
-    .select('id')
-    .single();
+  const base = {
+    id: shareId,
+    sender_id: userId,
+    token_hash: tokenHash,
+    token_lookup: lookup,
+    type,
+    watermark_seed: generateWatermarkSeed(),
+    storage_path: `shares/${shareId}`,
+    ...fields,
+  };
+  let { data, error } = await supabase.from('shares').insert(base).select('id').single();
+  // Retry without batch_id for deployments that haven't run the campaign migration.
+  if (error && 'batch_id' in base) {
+    const { batch_id: _omit, ...withoutBatch } = base;
+    ({ data, error } = await supabase.from('shares').insert(withoutBatch).select('id').single());
+  }
   if (error || !data) throw new Error('Failed to create share');
   return data.id;
 }
@@ -169,6 +171,9 @@ async function createForEachRecipient(
 ): Promise<CreatedShare[]> {
   const shareIds: string[] = [];
   const created: CreatedShare[] = [];
+  // One batch id ties all per-recipient copies of this upload together so the
+  // dashboard can show them as a single campaign.
+  const batchId = randomUUID();
   try {
     for (const r of recipients) {
       const token = generateToken();
@@ -177,6 +182,7 @@ async function createForEachRecipient(
       const payload = watermarkPayload(shareId, r.email);
       const extra = await process(shareId, payload, r.email);
       await createShareRecord(req.user!.userId, token, type, shareId, {
+        batch_id: batchId,
         ...recipientFields(r, options),
         ...extra,
       });
@@ -395,14 +401,16 @@ router.post('/message', requireAuth, uploadLimiter, async (req: Request, res: Re
     const supabase = getSupabase();
     const shareIds: string[] = [];
     const created: CreatedShare[] = [];
+    const batchId = randomUUID();
     try {
       for (const m of data.messages) {
         const token = generateToken();
         const shareId = randomUUID();
         shareIds.push(shareId);
-        const { error } = await supabase.from('shares').insert({
+        const row = {
           id: shareId,
           sender_id: req.user!.userId,
+          batch_id: batchId,
           token_hash: await hashToken(token),
           token_lookup: tokenLookup(token),
           type: 'message',
@@ -412,7 +420,13 @@ router.post('/message', requireAuth, uploadLimiter, async (req: Request, res: Re
           self_destruct_seconds: options.selfDestructSeconds,
           watermark_seed: generateWatermarkSeed(),
           storage_path: null,
-        });
+        };
+        let { error } = await supabase.from('shares').insert(row);
+        if (error) {
+          // Retry without batch_id (campaign migration not yet applied).
+          const { batch_id: _omit, ...withoutBatch } = row;
+          ({ error } = await supabase.from('shares').insert(withoutBatch));
+        }
         if (error) throw new Error('Failed to create message share');
         await logAudit(shareId, 'share_created', req);
         // fragmentC stays client-side; the frontend appends it to the URL.
