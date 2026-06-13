@@ -31,13 +31,25 @@ export const otpVerifySchema = z.object({
   code: z.string().length(6).regex(/^\d+$/),
 });
 
-export const messageUploadSchema = z.object({
+export const recipientSchema = z.object({
+  name: z.string().min(1).max(200),
+  email: z.string().email(),
+});
+
+// Up to 25 uniquely-watermarked copies per upload — the core leak-tracing flow.
+export const recipientsSchema = z.array(recipientSchema).min(1).max(25);
+
+export const messageRecipientSchema = z.object({
   ciphertext: z.string().min(1).max(500000),
   iv: z.string().min(1),
   salt: z.string().optional().default(''),
   keyFragmentB: z.string().min(1),
-  recipientName: z.string().min(1).max(200),
-  recipientEmail: z.string().email(),
+  name: z.string().min(1).max(200),
+  email: z.string().email(),
+});
+
+export const messageBatchSchema = z.object({
+  messages: z.array(messageRecipientSchema).min(1).max(25),
   maxViews: z.coerce.number().int().min(1).max(999999).default(1),
   expiresAt: z.string().optional().nullable(),
   selfDestructSeconds: z.coerce.number().int().optional().nullable(),
@@ -45,8 +57,6 @@ export const messageUploadSchema = z.object({
 });
 
 export const shareOptionsSchema = z.object({
-  recipientName: z.string().min(1).max(200),
-  recipientEmail: z.string().email(),
   maxViews: z.coerce.number().int().min(1).max(999999).default(1),
   expiresAt: z.string().optional().nullable(),
   otpRequired: z.coerce.boolean().default(true),

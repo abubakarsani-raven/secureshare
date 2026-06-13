@@ -94,6 +94,31 @@ interface ShareMatch {
   createdAt: string;
   viewCount: number;
   confidence: number;
+  source: 'embedded' | 'ocr';
+}
+
+// Builds a match from a share id (the embedded watermark's documentId). This is
+// exact — no OCR guessing — so confidence is 100%. Scoped to the caller's own
+// shares unless an operator secret was used (userId omitted).
+async function matchByShareId(shareId: string, userId?: string): Promise<ShareMatch | null> {
+  const supabase = getSupabase();
+  let query = supabase
+    .from('shares')
+    .select('id, recipient_name, recipient_email_hint, type, created_at, view_count')
+    .eq('id', shareId);
+  if (userId) query = query.eq('sender_id', userId);
+  const { data: s } = await query.single();
+  if (!s) return null;
+  return {
+    recipientName: s.recipient_name,
+    emailHint: s.recipient_email_hint,
+    shareId: s.id,
+    type: s.type,
+    createdAt: s.created_at,
+    viewCount: s.view_count,
+    confidence: 1,
+    source: 'embedded',
+  };
 }
 
 // Matches OCR'd watermark text against the caller's own shares by recipient
@@ -126,6 +151,7 @@ async function matchOwnShare(userId: string, ocrText: string): Promise<ShareMatc
         createdAt: s.created_at,
         viewCount: s.view_count,
         confidence,
+        source: 'ocr',
       };
     }
   }
@@ -141,45 +167,36 @@ router.post('/extract', requireAdminOrUser, upload.single('file'), async (req: R
 
     const result = await extractWatermark(req.file.buffer);
 
-    // The invisible LSB/DCT marks only exist on image/PDF shares and do not
-    // survive screenshots; the faint on-screen watermark does. Reveal it, OCR
-    // it, and match the text against the caller's own shares to name the leak.
+    let match: ShareMatch | null = null;
+
+    // Preferred path: an embedded LSB/DCT watermark (image/PDF originals) carries
+    // the exact share id, so we can identify the recipient with certainty.
+    if (result.found && result.payload) {
+      match = await matchByShareId(result.payload.documentId, req.user?.userId);
+    }
+
+    // Fallback path: a screenshot has no embedded mark, but the faint on-screen
+    // watermark survives — reveal it, OCR it, and fuzzy-match the recipient.
     let reveal: string | null = null;
     let ocrText = '';
-    let match: ShareMatch | null = null;
     try {
       const revealed = await revealBuffer(req.file.buffer);
       reveal = `data:image/png;base64,${revealed.toString('base64')}`;
-      ocrText = await ocrRevealed(revealed);
-      if (req.user) match = await matchOwnShare(req.user.userId, ocrText);
+      if (!match) {
+        ocrText = await ocrRevealed(revealed);
+        if (req.user) match = await matchOwnShare(req.user.userId, ocrText);
+      }
     } catch (err) {
       logger.warn('Reveal/OCR failed', { error: String(err) });
     }
 
-    if (!result.found || !result.payload) {
-      res.json({ found: false, payload: null, reveal, ocrText, match });
-      return;
-    }
-
-    // Non-admin callers may only see embedded watermarks of shares they sent.
-    if (req.user) {
-      const supabase = getSupabase();
-      const { data: share } = await supabase
-        .from('shares')
-        .select('id')
-        .eq('id', result.payload.documentId)
-        .eq('sender_id', req.user.userId)
-        .single();
-      if (!share) {
-        res.json({ found: false, payload: null, reveal, ocrText, match });
-        return;
-      }
-    }
+    // Only expose the raw embedded payload for shares the caller owns.
+    const showPayload = result.found && result.payload && (!req.user || match?.source === 'embedded');
 
     res.json({
-      found: true,
-      method: result.method,
-      payload: result.payload,
+      found: !!showPayload,
+      method: showPayload ? result.method : null,
+      payload: showPayload ? result.payload : null,
       reveal,
       ocrText,
       match,

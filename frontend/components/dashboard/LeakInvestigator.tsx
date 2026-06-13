@@ -12,6 +12,7 @@ interface ShareMatch {
   createdAt: string;
   viewCount: number;
   confidence: number;
+  source: 'embedded' | 'ocr';
 }
 
 interface ExtractResult {
@@ -65,7 +66,9 @@ export default function LeakInvestigator() {
         <Search className="w-6 h-6 text-primary" />
         <div>
           <h3 className="font-semibold">Leak Investigator</h3>
-          <p className="text-sm text-zinc-500">Upload a leaked image to extract watermark data</p>
+          <p className="text-sm text-zinc-500">
+            Upload a leaked copy or screenshot to identify which recipient it came from
+          </p>
         </div>
       </div>
       <div className="flex gap-4 items-end">
@@ -88,10 +91,17 @@ export default function LeakInvestigator() {
         <div className="mt-4 p-4 rounded-lg bg-zinc-50 space-y-4">
           {result.match ? (
             <div className="p-4 rounded-lg bg-green-50 border border-green-200">
-              <p className="font-semibold text-green-800">
-                Leak traced to: {result.match.recipientName}
-              </p>
-              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-green-900">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-semibold text-green-800">
+                  Leak traced to: {result.match.recipientName}
+                </p>
+                <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-green-200 text-green-900">
+                  {result.match.source === 'embedded'
+                    ? 'Embedded watermark · exact'
+                    : `On-screen watermark · ${Math.round(result.match.confidence * 100)}%`}
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-green-900">
                 <span className="text-green-700">Recipient email</span>
                 <span>{result.match.emailHint}</span>
                 <span className="text-green-700">Shared as</span>
@@ -100,36 +110,32 @@ export default function LeakInvestigator() {
                 <span>{new Date(result.match.createdAt).toLocaleString()}</span>
                 <span className="text-green-700">Views</span>
                 <span>{result.match.viewCount}</span>
-                <span className="text-green-700">Match confidence</span>
-                <span>{Math.round(result.match.confidence * 100)}%</span>
               </div>
-              <p className="mt-2 text-xs text-green-700">
-                Open this share in your list to see the full audit trail (precise location, device, time).
+              <p className="mt-3 text-xs text-green-700">
+                Find this recipient in “Your shares” above to see the full audit trail —
+                precise location, device, and time of every view.
               </p>
             </div>
           ) : (
             <p className="text-sm text-zinc-500">
-              Could not auto-match a recipient. Read the recipient label off the revealed image below.
+              Could not auto-identify a recipient. If you uploaded a screenshot, read the recipient
+              label off the revealed image below; embedded watermarks need the original file (not a
+              screenshot).
             </p>
           )}
 
-          {result.found && result.payload && (
-            <div className="space-y-2 text-sm">
-              <p className="font-medium text-green-700">Embedded watermark found ({result.method})</p>
-              <pre className="text-xs overflow-x-auto">{JSON.stringify(result.payload, null, 2)}</pre>
-            </div>
-          )}
-
           {result.reveal && (
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Revealed on-screen watermark</p>
-              <p className="text-xs text-zinc-500">
-                Contrast-amplified to surface the faint diagonal label
-                (recipient · share · time). Best on plain backgrounds.
+            <details className="group">
+              <summary className="text-sm font-medium cursor-pointer text-zinc-600 hover:text-zinc-900">
+                Show revealed watermark image
+              </summary>
+              <p className="text-xs text-zinc-500 mt-2 mb-2">
+                Contrast-amplified to surface the faint diagonal label (recipient · share id).
+                Best on plain backgrounds.
               </p>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={result.reveal} alt="Revealed watermark" className="w-full rounded border bg-white" />
-            </div>
+            </details>
           )}
         </div>
       )}

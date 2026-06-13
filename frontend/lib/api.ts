@@ -93,11 +93,18 @@ export async function apiFetchBlob(path: string, viewSession = true): Promise<Bl
   return res.blob();
 }
 
+interface CreatedShare {
+  recipientName: string;
+  recipientEmail: string;
+  token: string;
+  shareUrl: string;
+}
+
 export async function uploadFile(
   path: string,
   formData: FormData,
   onProgress?: (percent: number) => void
-): Promise<{ token: string; shareUrl: string }> {
+): Promise<{ shares: CreatedShare[] }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${API_URL}${path}`);
