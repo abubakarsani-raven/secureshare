@@ -245,8 +245,8 @@ router.post(
       const options = parseSharedOptions(req.body);
       const buffer = req.file.buffer;
 
-      const shares = await createForEachRecipient(req, 'document', recipients, options, async (shareId, payload) => {
-        const pageCount = await processPdf(buffer, shareId, payload);
+      const shares = await createForEachRecipient(req, 'document', recipients, options, async (shareId, payload, _email, fingerprint) => {
+        const pageCount = await processPdf(buffer, shareId, payload, fingerprint);
         return { page_count: pageCount };
       });
 

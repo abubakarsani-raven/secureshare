@@ -2,68 +2,39 @@ import { createHmac } from 'crypto';
 import sharp from 'sharp';
 
 // Spread-spectrum embedding of a Tardos codeword into an image. Each codeword
-// bit is spread (with a secret PN sign) across many 8x8 DCT blocks and detected
-// by correlation. Crucially this degrades GRACEFULLY: JPEG, mild scaling, or a
-// colluded splice of two recipients' copies yields a NOISY bit vector rather
-// than total loss, which is exactly what the Tardos accusation consumes — so a
-// real, possibly-colluded leak still implicates a true recipient.
+// bit is spread (with a secret PN sign) across many 8x8 blocks and detected by
+// correlation against one mid-frequency DCT basis vector. This degrades
+// GRACEFULLY: JPEG, mild scaling, or a colluded splice of two recipients' copies
+// yields a NOISY bit vector rather than total loss — exactly what the Tardos
+// accusation consumes — so a real, possibly-colluded leak still implicates a
+// true recipient.
 //
-// Uses the green channel only, leaving the blue-channel DCT payload and
-// red-channel LSB forensic marks untouched.
+// Only the green channel is touched, leaving the blue-channel DCT payload and
+// red-channel LSB forensic marks intact. Rather than a full 8x8 DCT per block we
+// project onto a single precomputed orthonormal basis vector for the target
+// coefficient, which is ~16x faster and keeps multi-page documents feasible.
 
 const BLOCK = 8;
-const STRENGTH = 18; // antipodal coefficient magnitude; trades visibility vs robustness
-const COEF_U = 3; // mid-frequency coefficient — survives JPEG, low visibility
-const COEF_V = 2;
+const STRENGTH = 18; // antipodal coefficient magnitude; visibility vs robustness
+const COEF_U: number = 3; // mid-frequency coefficient (row/vertical) — survives JPEG
+const COEF_V: number = 2; // (col/horizontal)
 const CHANNEL = 1; // green
 
-function dct1d(input: number[]): number[] {
-  const N = input.length;
-  const out = new Array<number>(N).fill(0);
-  for (let u = 0; u < N; u++) {
-    let sum = 0;
-    for (let x = 0; x < N; x++) sum += input[x] * Math.cos(((2 * x + 1) * u * Math.PI) / (2 * N));
-    out[u] = sum * (u === 0 ? Math.sqrt(1 / N) : Math.sqrt(2 / N));
-  }
-  return out;
-}
-
-function idct1d(input: number[]): number[] {
-  const N = input.length;
-  const out = new Array<number>(N).fill(0);
-  for (let x = 0; x < N; x++) {
-    let sum = 0;
-    for (let u = 0; u < N; u++) {
-      const c = u === 0 ? Math.sqrt(1 / N) : Math.sqrt(2 / N);
-      sum += c * input[u] * Math.cos(((2 * x + 1) * u * Math.PI) / (2 * N));
+// Orthonormal 2D DCT basis for the (COEF_U, COEF_V) coefficient. <BASIS,BASIS>=1,
+// so the coefficient is sum(pixel*BASIS) and setting it is a single projection.
+const BASIS: number[][] = (() => {
+  const cu = COEF_U === 0 ? Math.sqrt(1 / BLOCK) : Math.sqrt(2 / BLOCK);
+  const cv = COEF_V === 0 ? Math.sqrt(1 / BLOCK) : Math.sqrt(2 / BLOCK);
+  const b: number[][] = [];
+  for (let i = 0; i < BLOCK; i++) {
+    b[i] = [];
+    for (let j = 0; j < BLOCK; j++) {
+      b[i][j] =
+        cu * cv * Math.cos(((2 * i + 1) * COEF_U * Math.PI) / 16) * Math.cos(((2 * j + 1) * COEF_V * Math.PI) / 16);
     }
-    out[x] = sum;
   }
-  return out;
-}
-
-function dct2(block: number[][]): number[][] {
-  const rows = block.map(dct1d);
-  const cols: number[][] = Array.from({ length: BLOCK }, () => new Array<number>(BLOCK));
-  for (let c = 0; c < BLOCK; c++) {
-    const col = idctColumnForward(rows, c);
-    for (let r = 0; r < BLOCK; r++) cols[r][c] = col[r];
-  }
-  return cols;
-}
-
-function idctColumnForward(rows: number[][], c: number): number[] {
-  return dct1d(rows.map((r) => r[c]));
-}
-
-function idct2(coeffs: number[][]): number[][] {
-  const cols: number[][] = Array.from({ length: BLOCK }, () => new Array<number>(BLOCK));
-  for (let c = 0; c < BLOCK; c++) {
-    const col = idct1d(coeffs.map((r) => r[c]));
-    for (let r = 0; r < BLOCK; r++) cols[r][c] = col[r];
-  }
-  return cols.map(idct1d);
-}
+  return b;
+})();
 
 // Deterministic per-block assignment: which codeword bit a block carries and the
 // secret +/-1 chip applied to it (spreads/whitens the pattern).
@@ -84,36 +55,37 @@ export async function embedFingerprintImage(
   const blocksX = Math.floor(info.width / BLOCK);
   const blocksY = Math.floor(info.height / BLOCK);
   const total = codeword.length;
-
   const out = Buffer.from(data);
+
   let k = 0;
   for (let by = 0; by < blocksY; by++) {
     for (let bx = 0; bx < blocksX; bx++, k++) {
       const { bit, chip } = blockKey(secret, k, total);
-      const block: number[][] = Array.from({ length: BLOCK }, () => new Array<number>(BLOCK));
-      for (let i = 0; i < BLOCK; i++)
+      // current coefficient = projection of the block onto the basis
+      let cur = 0;
+      for (let i = 0; i < BLOCK; i++) {
+        const row = (by * BLOCK + i) * info.width;
         for (let j = 0; j < BLOCK; j++) {
-          const x = bx * BLOCK + j;
-          const y = by * BLOCK + i;
-          block[i][j] = data[(y * info.width + x) * ch + CHANNEL];
+          cur += data[(row + bx * BLOCK + j) * ch + CHANNEL] * BASIS[i][j];
         }
-      const coeffs = dct2(block);
-      const antipodal = codeword[bit] === 1 ? 1 : -1;
-      coeffs[COEF_U][COEF_V] = antipodal * chip * STRENGTH;
-      const restored = idct2(coeffs);
-      for (let i = 0; i < BLOCK; i++)
+      }
+      const target = (codeword[bit] === 1 ? 1 : -1) * chip * STRENGTH;
+      const delta = target - cur;
+      // adding delta*BASIS sets only this coefficient (orthonormal basis)
+      for (let i = 0; i < BLOCK; i++) {
+        const row = (by * BLOCK + i) * info.width;
         for (let j = 0; j < BLOCK; j++) {
-          const x = bx * BLOCK + j;
-          const y = by * BLOCK + i;
-          out[(y * info.width + x) * ch + CHANNEL] = Math.max(0, Math.min(255, Math.round(restored[i][j])));
+          const idx = (row + bx * BLOCK + j) * ch + CHANNEL;
+          out[idx] = Math.max(0, Math.min(255, Math.round(data[idx] + delta * BASIS[i][j])));
         }
+      }
     }
   }
 
   return sharp(out, { raw: { width: info.width, height: info.height, channels: ch } }).png().toBuffer();
 }
 
-// Returns hard bits (0/1) for each codeword position. Positions whose correlation
+// Returns hard bits (0/1) per codeword position. Positions whose correlation
 // magnitude is below `erasureEps` are marked -1 (erasure) so the Tardos scorer
 // can skip unreliable bits rather than guess.
 export async function extractFingerprintImage(
@@ -126,21 +98,20 @@ export async function extractFingerprintImage(
   const ch = info.channels;
   const blocksX = Math.floor(info.width / BLOCK);
   const blocksY = Math.floor(info.height / BLOCK);
-
   const accum = new Float64Array(length);
+
   let k = 0;
   for (let by = 0; by < blocksY; by++) {
     for (let bx = 0; bx < blocksX; bx++, k++) {
       const { bit, chip } = blockKey(secret, k, length);
-      const block: number[][] = Array.from({ length: BLOCK }, () => new Array<number>(BLOCK));
-      for (let i = 0; i < BLOCK; i++)
+      let coef = 0;
+      for (let i = 0; i < BLOCK; i++) {
+        const row = (by * BLOCK + i) * info.width;
         for (let j = 0; j < BLOCK; j++) {
-          const x = bx * BLOCK + j;
-          const y = by * BLOCK + i;
-          block[i][j] = data[(y * info.width + x) * ch + CHANNEL];
+          coef += data[(row + bx * BLOCK + j) * ch + CHANNEL] * BASIS[i][j];
         }
-      const coeffs = dct2(block);
-      accum[bit] += coeffs[COEF_U][COEF_V] * chip; // correlate against the chip
+      }
+      accum[bit] += coef * chip; // correlate against the chip
     }
   }
 
