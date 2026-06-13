@@ -172,7 +172,12 @@ async function createForEachRecipient(
   type: string,
   recipients: Recipient[],
   options: SharedOptions,
-  process: (shareId: string, payload: WatermarkPayload, email: string) => Promise<Record<string, unknown>>
+  process: (
+    shareId: string,
+    payload: WatermarkPayload,
+    email: string,
+    fingerprint: Uint8Array
+  ) => Promise<Record<string, unknown>>
 ): Promise<CreatedShare[]> {
   const shareIds: string[] = [];
   const created: CreatedShare[] = [];
@@ -189,10 +194,11 @@ async function createForEachRecipient(
       const token = generateToken();
       const shareId = randomUUID();
       shareIds.push(shareId);
-      const codeword = packBits(fingerprints.codewords[i]);
+      const codewordBits = fingerprints.codewords[i];
+      const codeword = packBits(codewordBits);
       const payload = watermarkPayload(shareId, r.email);
       payload.fp = codeword;
-      const extra = await process(shareId, payload, r.email);
+      const extra = await process(shareId, payload, r.email, codewordBits);
       await createShareRecord(req.user!.userId, token, type, shareId, {
         batch_id: batchId,
         fingerprint: codeword,
@@ -284,8 +290,8 @@ router.post(
       const options = parseSharedOptions(req.body);
       const buffer = req.file.buffer;
 
-      const shares = await createForEachRecipient(req, 'image', recipients, options, async (shareId, payload) => {
-        await processImage(buffer, shareId, payload);
+      const shares = await createForEachRecipient(req, 'image', recipients, options, async (shareId, payload, _email, fingerprint) => {
+        await processImage(buffer, shareId, payload, fingerprint);
         return {};
       });
 

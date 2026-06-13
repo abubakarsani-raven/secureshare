@@ -7,7 +7,9 @@ import {
   unpackBits,
   Accusation,
 } from './tardos';
+import { extractFingerprintImage } from './fingerprintEmbed';
 import { getSupabase } from '../storage';
+import { getWatermarkSecret } from '../encryption';
 import { logger } from '../../utils/logger';
 
 // Resistance target: any coalition of up to this many recipients colluding on a
@@ -61,12 +63,12 @@ export interface TraceResult {
   accused: boolean;
 }
 
-// Scores every recipient in a campaign against the fingerprint extracted from a
-// leaked copy and returns them ranked. Even a colluded/spliced copy points at a
-// true leaker. `extractedFpB64` is the codeword recovered from the leaked file.
-export async function traceLeak(
+// Extracts the spread-spectrum fingerprint from a leaked image and scores every
+// recipient in the campaign, returning them ranked. The extraction degrades
+// gracefully (JPEG, splicing), so even a colluded copy points at a true leaker.
+export async function traceImageLeak(
   batchId: string,
-  extractedFpB64: string,
+  imageBuffer: Buffer,
   senderId?: string
 ): Promise<{ threshold: number; ranked: TraceResult[] } | null> {
   const supabase = getSupabase();
@@ -80,7 +82,14 @@ export async function traceLeak(
 
   const bias: number[] = JSON.parse(campaign.bias);
   const length: number = campaign.code_length;
-  const extractedBits = unpackBits(extractedFpB64, length);
+
+  let extractedBits: Int8Array;
+  try {
+    extractedBits = await extractFingerprintImage(imageBuffer, length, getWatermarkSecret());
+  } catch (err) {
+    logger.warn('Fingerprint extraction failed', { error: String(err) });
+    return null;
+  }
 
   const { data: shares } = await supabase
     .from('shares')
@@ -89,6 +98,7 @@ export async function traceLeak(
   if (!shares || shares.length === 0) return null;
 
   const withCodes = shares.filter((s) => s.fingerprint);
+  if (withCodes.length === 0) return null;
   const codewords = withCodes.map((s) => unpackBits(s.fingerprint as string, length));
   const threshold = accusationThreshold(length, withCodes.length, 1e-3);
   const accusations: Accusation[] = accuse(extractedBits, codewords, bias, threshold);

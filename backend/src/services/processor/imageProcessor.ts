@@ -6,7 +6,9 @@ import {
   encryptBuffer,
   serializeEncrypted,
   getEncryptionKey,
+  getWatermarkSecret,
 } from '../encryption';
+import { embedFingerprintImage } from '../fingerprint/fingerprintEmbed';
 import { uploadFile } from '../storage';
 
 const MAX_DIMENSION = 4096;
@@ -14,7 +16,8 @@ const MAX_DIMENSION = 4096;
 export async function processImage(
   buffer: Buffer,
   shareId: string,
-  payload: WatermarkPayload
+  payload: WatermarkPayload,
+  fingerprint?: Uint8Array
 ): Promise<void> {
   // .rotate() bakes in EXIF orientation; sharp strips all metadata by default on output
   let pipeline = sharp(buffer).rotate();
@@ -27,6 +30,11 @@ export async function processImage(
   let processed = await pipeline.png().toBuffer();
   processed = await embedDCT(processed, payload);
   processed = await embedLSB(processed, payload);
+  // Collusion-secure spread-spectrum fingerprint (green channel): survives JPEG
+  // and splicing, so a colluded leak still traces to a recipient.
+  if (fingerprint) {
+    processed = await embedFingerprintImage(processed, fingerprint, getWatermarkSecret());
+  }
 
   const encrypted = await encryptBuffer(processed, getEncryptionKey());
   const serialized = serializeEncrypted(encrypted);
