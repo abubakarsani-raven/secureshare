@@ -4,6 +4,16 @@ import { useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { Search, Upload } from 'lucide-react';
 
+interface ShareMatch {
+  recipientName: string;
+  emailHint: string;
+  shareId: string;
+  type: string;
+  createdAt: string;
+  viewCount: number;
+  confidence: number;
+}
+
 interface ExtractResult {
   found: boolean;
   method?: string;
@@ -17,6 +27,9 @@ interface ExtractResult {
   // Contrast-amplified image that surfaces the faint on-screen watermark text
   // so the recipient label can be read off a leaked screenshot.
   reveal?: string | null;
+  // OCR'd watermark text and the best fuzzy match against the user's own shares.
+  ocrText?: string;
+  match?: ShareMatch | null;
 }
 
 export default function LeakInvestigator() {
@@ -73,16 +86,38 @@ export default function LeakInvestigator() {
       </div>
       {result && (
         <div className="mt-4 p-4 rounded-lg bg-zinc-50 space-y-4">
-          {result.found && result.payload ? (
+          {result.match ? (
+            <div className="p-4 rounded-lg bg-green-50 border border-green-200">
+              <p className="font-semibold text-green-800">
+                Leak traced to: {result.match.recipientName}
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-green-900">
+                <span className="text-green-700">Recipient email</span>
+                <span>{result.match.emailHint}</span>
+                <span className="text-green-700">Shared as</span>
+                <span>{result.match.type}</span>
+                <span className="text-green-700">Created</span>
+                <span>{new Date(result.match.createdAt).toLocaleString()}</span>
+                <span className="text-green-700">Views</span>
+                <span>{result.match.viewCount}</span>
+                <span className="text-green-700">Match confidence</span>
+                <span>{Math.round(result.match.confidence * 100)}%</span>
+              </div>
+              <p className="mt-2 text-xs text-green-700">
+                Open this share in your list to see the full audit trail (precise location, device, time).
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-zinc-500">
+              Could not auto-match a recipient. Read the recipient label off the revealed image below.
+            </p>
+          )}
+
+          {result.found && result.payload && (
             <div className="space-y-2 text-sm">
               <p className="font-medium text-green-700">Embedded watermark found ({result.method})</p>
               <pre className="text-xs overflow-x-auto">{JSON.stringify(result.payload, null, 2)}</pre>
             </div>
-          ) : (
-            <p className="text-sm text-zinc-500">
-              No embedded LSB/DCT watermark — expected for screenshots and for message shares.
-              Use the revealed image below to read the on-screen watermark.
-            </p>
           )}
 
           {result.reveal && (

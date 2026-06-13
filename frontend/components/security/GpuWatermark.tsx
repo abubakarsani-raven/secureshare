@@ -5,9 +5,9 @@ import { useEffect, useRef } from 'react';
 interface Props {
   // Identifying text baked into every view (recipient + share id + time).
   label: string;
-  // 0..1 overall opacity. Defaults to a faint forensic level: barely
-  // perceptible during normal viewing, but recoverable from a leaked
-  // screenshot by boosting contrast.
+  // 0..1 overall opacity. Defaults to a faint-but-visible level (like a bank
+  // statement watermark): noticeable if you look, and dark enough that the leak
+  // tool can OCR the label off a screenshot to auto-identify the recipient.
   opacity?: number;
 }
 
@@ -18,7 +18,7 @@ interface Props {
 // sits above the content; because it is part of the rendered pixels it survives
 // screenshots, unlike invisible LSB/DCT marks. It carries a light+dark pair so
 // the mark is recoverable on both light and dark backgrounds.
-export default function GpuWatermark({ label, opacity = 0.1 }: Props) {
+export default function GpuWatermark({ label, opacity = 0.25 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -75,20 +75,23 @@ export default function GpuWatermark({ label, opacity = 0.1 }: Props) {
       `attribute vec2 p; varying vec2 uv;
        void main(){ uv = (p + 1.0) * 0.5; gl_Position = vec4(p, 0.0, 1.0); }`
     );
-    // Repeat + rotate the tile in the shader (GPU), then apply opacity.
+    // Rotate in true pixel space (not uv space) so the tiles stay square and the
+    // on-screen watermark angle equals uAngle exactly — that lets the leak tool
+    // deskew by a known angle for OCR, regardless of the view's aspect ratio.
     const fs = compile(
       gl.FRAGMENT_SHADER,
       `precision mediump float;
        varying vec2 uv;
        uniform sampler2D tex;
-       uniform vec2 uRepeat;
+       uniform vec2 uDims;
+       uniform float uTile;
        uniform float uOpacity;
        uniform float uAngle;
        void main(){
-         vec2 c = uv * uRepeat;
+         vec2 px = uv * uDims;
          float s = sin(uAngle), co = cos(uAngle);
-         vec2 r = mat2(co, -s, s, co) * (c - 0.5 * uRepeat) + 0.5 * uRepeat;
-         vec4 t = texture2D(tex, fract(r));
+         vec2 r = mat2(co, -s, s, co) * px;
+         vec4 t = texture2D(tex, fract(r / uTile));
          gl_FragColor = vec4(t.rgb, t.a * uOpacity);
        }`
     );
@@ -123,7 +126,8 @@ export default function GpuWatermark({ label, opacity = 0.1 }: Props) {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-    const uRepeat = gl.getUniformLocation(prog, 'uRepeat');
+    const uDims = gl.getUniformLocation(prog, 'uDims');
+    const uTile = gl.getUniformLocation(prog, 'uTile');
     const uOpacity = gl.getUniformLocation(prog, 'uOpacity');
     const uAngle = gl.getUniformLocation(prog, 'uAngle');
 
@@ -139,11 +143,12 @@ export default function GpuWatermark({ label, opacity = 0.1 }: Props) {
       gl.viewport(0, 0, canvas.width, canvas.height);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
-      // One tile per ~330px so each label instance is large enough to read
-      // when the watermark is later revealed from a leaked screenshot.
-      gl.uniform2f(uRepeat, w / 330, h / 330);
+      gl.uniform2f(uDims, canvas.width, canvas.height);
+      // One square tile per ~330 CSS px so each label instance is large enough
+      // to read when revealed from a leaked screenshot.
+      gl.uniform1f(uTile, 330 * dpr);
       gl.uniform1f(uOpacity, opacity);
-      gl.uniform1f(uAngle, -0.5); // ~ -28 degrees
+      gl.uniform1f(uAngle, -0.5); // -28.6 deg; the leak tool deskews by this
       gl.uniform1i(gl.getUniformLocation(prog, 'tex'), 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     };
