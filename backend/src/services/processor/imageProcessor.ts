@@ -18,7 +18,7 @@ export async function processImage(
   shareId: string,
   payload: WatermarkPayload,
   fingerprint?: Uint8Array
-): Promise<void> {
+): Promise<{ width: number; height: number }> {
   // .rotate() bakes in EXIF orientation; sharp strips all metadata by default on output
   let pipeline = sharp(buffer).rotate();
 
@@ -28,6 +28,9 @@ export async function processImage(
   }
 
   let processed = await pipeline.png().toBuffer();
+  // The fingerprint grid is tied to the processed pixel size; capture it so a
+  // rescaled leak can be resynchronized before extraction.
+  const dims = await sharp(processed).metadata();
   processed = await embedDCT(processed, payload);
   processed = await embedLSB(processed, payload);
   // Collusion-secure spread-spectrum fingerprint (green channel): survives JPEG
@@ -39,4 +42,5 @@ export async function processImage(
   const encrypted = await encryptBuffer(processed, getEncryptionKey());
   const serialized = serializeEncrypted(encrypted);
   await uploadFile(`shares/${shareId}/image.enc`, serialized, 'application/octet-stream');
+  return { width: dims.width || 0, height: dims.height || 0 };
 }

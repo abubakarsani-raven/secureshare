@@ -54,6 +54,8 @@ CREATE TABLE campaigns (
   code_length   INT NOT NULL,
   max_colluders INT NOT NULL,
   bias          TEXT NOT NULL,
+  embed_width   INT,
+  embed_height  INT,
   created_at    TIMESTAMPTZ DEFAULT now()
 );
 
@@ -128,7 +130,10 @@ $$ LANGUAGE sql;
 --   batch_id UUID PRIMARY KEY,
 --   sender_id UUID REFERENCES users(id) ON DELETE CASCADE,
 --   code_length INT NOT NULL, max_colluders INT NOT NULL,
---   bias TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT now()
+--   bias TEXT NOT NULL, embed_width INT, embed_height INT,
+--   created_at TIMESTAMPTZ DEFAULT now()
 -- );
+-- (existing campaigns table) ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS embed_width INT;
+-- ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS embed_height INT;
 
 -- Create private storage bucket 'secureshare-files' via Supabase Dashboard (no public access)

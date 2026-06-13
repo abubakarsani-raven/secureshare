@@ -7,7 +7,7 @@ import {
   unpackBits,
   Accusation,
 } from './tardos';
-import { extractFingerprintImage } from './fingerprintEmbed';
+import { extractFingerprintImage, extractFingerprintImageRobust } from './fingerprintEmbed';
 import { getSupabase } from '../storage';
 import { getWatermarkSecret } from '../encryption';
 import { logger } from '../../utils/logger';
@@ -29,21 +29,35 @@ export function buildCampaignFingerprints(numRecipients: number): CampaignFinger
   return { length, bias, codewords };
 }
 
-// Persists the secret bias so a future leak can be scored. Best-effort: if the
-// campaigns table isn't migrated yet, fingerprinting is simply skipped.
+// Persists the secret bias so a future leak can be scored. `embedDims` records
+// the pixel grid the fingerprint was embedded on, so a rescaled leak can be
+// resynchronized before extraction. Best-effort: if the campaigns table isn't
+// migrated yet, fingerprinting is simply skipped.
 export async function saveCampaign(
   batchId: string,
   senderId: string,
-  fp: CampaignFingerprints
+  fp: CampaignFingerprints,
+  embedDims?: { width: number; height: number }
 ): Promise<boolean> {
   try {
-    const { error } = await getSupabase().from('campaigns').insert({
+    const row: Record<string, unknown> = {
       batch_id: batchId,
       sender_id: senderId,
       code_length: fp.length,
       max_colluders: MAX_COLLUDERS,
       bias: JSON.stringify(fp.bias),
-    });
+    };
+    if (embedDims) {
+      row.embed_width = embedDims.width;
+      row.embed_height = embedDims.height;
+    }
+    let { error } = await getSupabase().from('campaigns').insert(row);
+    if (error && embedDims) {
+      // Retry without dim columns if that migration hasn't run.
+      delete row.embed_width;
+      delete row.embed_height;
+      ({ error } = await getSupabase().from('campaigns').insert(row));
+    }
     if (error) {
       logger.warn('Fingerprint campaign not saved (migration pending?)', { error: error.message });
       return false;
@@ -74,7 +88,7 @@ export async function traceImageLeak(
   const supabase = getSupabase();
   const { data: campaign } = await supabase
     .from('campaigns')
-    .select('code_length, bias, sender_id')
+    .select('code_length, bias, sender_id, embed_width, embed_height')
     .eq('batch_id', batchId)
     .single();
   if (!campaign) return null;
@@ -82,10 +96,22 @@ export async function traceImageLeak(
 
   const bias: number[] = JSON.parse(campaign.bias);
   const length: number = campaign.code_length;
+  const secret = getWatermarkSecret();
 
   let extractedBits: Int8Array;
   try {
-    extractedBits = await extractFingerprintImage(imageBuffer, length, getWatermarkSecret());
+    // If we know the embedding grid, resynchronize (handles rescaled/screenshot
+    // copies); otherwise read at native resolution.
+    extractedBits =
+      campaign.embed_width && campaign.embed_height
+        ? await extractFingerprintImageRobust(
+            imageBuffer,
+            length,
+            secret,
+            campaign.embed_width,
+            campaign.embed_height
+          )
+        : await extractFingerprintImage(imageBuffer, length, secret);
   } catch (err) {
     logger.warn('Fingerprint extraction failed', { error: String(err) });
     return null;

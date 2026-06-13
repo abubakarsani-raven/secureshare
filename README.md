@@ -6,10 +6,18 @@ Zero-knowledge, end-to-end encrypted platform for sharing PDFs, images, videos, 
 
 - **Zero-knowledge messages**: Client-side AES-256-GCM encryption with split key fragments (OTP-derived, server-held, URL hash). Server never decrypts.
 - **File encryption**: All processed content encrypted at rest with AES-256-GCM (HKDF-derived keys).
-- **Forensic watermarks**: DCT (images/PDF pages), LSB (images), phase coding (audio), FFmpeg drawtext (video).
-- **Access control**: bcrypt-hashed tokens, SHA3-hashed emails, OTP verification, view limits, expiry, revocation.
+- **Per-recipient leak tracing**: send one file/message to many recipients; each gets a uniquely watermarked, individually tracked copy. The Leak Investigator identifies which recipient a leaked copy came from.
+- **Collusion-secure fingerprinting**: symmetric Tardos codes embedded via spread-spectrum DCT (image/PDF pages). Survives JPEG, rescaling/screenshots, and collusion (recipients splicing a mixed copy still implicates a real leaker). See `backend/src/services/fingerprint/`.
+- **Forensic watermarks**: DCT + LSB (images/PDF pages) for exact ID, faint on-screen watermark with OCR auto-attribution, phase coding (audio), FFmpeg drawtext (video).
+- **Access control**: bcrypt-hashed tokens, SHA3-hashed emails, OTP/TOTP verification, view limits, expiry, instant revocation enforced on content.
 - **Secure viewing**: Canvas-only rendering, anti-capture, DevTools detection, focus blur, no downloads.
-- **Audit trail**: Append-only audit log with geolocation, device fingerprint, IP.
+- **Audit trail**: audit log with precise (mandatory) viewer geolocation, IP geo, device fingerprint.
+
+### Leak-tracing scope (honest)
+
+Collusion resistance is proven on the codeword and survives JPEG, uniform rescaling/screenshots, and splicing for **images and PDF pages**. It does **not** yet survive perspective distortion (phone photo of a screen at an angle), rotation, or print-then-scan — those need a registration/DNN front-end. Video/audio carry an exact-but-fragile embedded ID, not the spread-spectrum fingerprint. Not independently audited; do not use to accuse a real person without one.
+
+Tests: `npx ts-node backend/test-tardos.ts` (collusion resistance), `backend/test-watermarks.ts` (watermark round-trips).
 
 ## Tech Stack
 
@@ -63,7 +71,7 @@ Fill in environment variables:
 2. Run `supabase/schema.sql` in the SQL editor
 3. Create a private storage bucket named `secureshare-files` (no public access)
 
-For databases created from an older schema, also run the additions at the bottom of `schema.sql`: the `increment_view_count` / `increment_otp_attempts` functions and `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN DEFAULT false;`.
+For databases created from an older schema, run the migration block at the bottom of `schema.sql` (commented `ALTER`/`CREATE` statements): `totp_enabled`, the `increment_view_count` / `increment_otp_attempts` functions, audit `latitude`/`longitude`/`geo_accuracy`, `shares.batch_id` + index, `shares.fingerprint`, and the `campaigns` table (with `embed_width`/`embed_height`). All backend writes fall back gracefully if a migration hasn't been applied, but the corresponding feature stays off until it is.
 
 ### 3. Run backend
 

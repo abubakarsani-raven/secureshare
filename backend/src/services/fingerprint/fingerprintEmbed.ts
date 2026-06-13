@@ -85,9 +85,51 @@ export async function embedFingerprintImage(
   return sharp(out, { raw: { width: info.width, height: info.height, channels: ch } }).png().toBuffer();
 }
 
+// Correlates the green-channel blocks against the chip sequence, with the block
+// grid started at pixel origin (ox, oy). Returns the per-bit accumulator.
+function correlate(
+  data: Buffer,
+  width: number,
+  height: number,
+  ch: number,
+  length: number,
+  secret: string,
+  ox: number,
+  oy: number
+): Float64Array {
+  const blocksX = Math.floor((width - ox) / BLOCK);
+  const blocksY = Math.floor((height - oy) / BLOCK);
+  const accum = new Float64Array(length);
+  let k = 0;
+  for (let by = 0; by < blocksY; by++) {
+    for (let bx = 0; bx < blocksX; bx++, k++) {
+      const { bit, chip } = blockKey(secret, k, length);
+      let coef = 0;
+      for (let i = 0; i < BLOCK; i++) {
+        const row = (by * BLOCK + oy + i) * width;
+        for (let j = 0; j < BLOCK; j++) {
+          coef += data[(row + bx * BLOCK + ox + j) * ch + CHANNEL] * BASIS[i][j];
+        }
+      }
+      accum[bit] += coef * chip;
+    }
+  }
+  return accum;
+}
+
+function bitsFromAccum(accum: Float64Array, length: number, erasureEps: number): Int8Array {
+  const bits = new Int8Array(length);
+  for (let i = 0; i < length; i++) {
+    if (Math.abs(accum[i]) <= erasureEps) bits[i] = -1;
+    else bits[i] = accum[i] > 0 ? 1 : 0;
+  }
+  return bits;
+}
+
 // Returns hard bits (0/1) per codeword position. Positions whose correlation
 // magnitude is below `erasureEps` are marked -1 (erasure) so the Tardos scorer
-// can skip unreliable bits rather than guess.
+// can skip unreliable bits rather than guess. Assumes the leak is at the
+// embedding resolution (use the robust variant for screenshots/rescales).
 export async function extractFingerprintImage(
   imageBuffer: Buffer,
   length: number,
@@ -95,30 +137,43 @@ export async function extractFingerprintImage(
   erasureEps = 0
 ): Promise<Int8Array> {
   const { data, info } = await sharp(imageBuffer).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-  const ch = info.channels;
-  const blocksX = Math.floor(info.width / BLOCK);
-  const blocksY = Math.floor(info.height / BLOCK);
-  const accum = new Float64Array(length);
+  const accum = correlate(data, info.width, info.height, info.channels, length, secret, 0, 0);
+  return bitsFromAccum(accum, length, erasureEps);
+}
 
-  let k = 0;
-  for (let by = 0; by < blocksY; by++) {
-    for (let bx = 0; bx < blocksX; bx++, k++) {
-      const { bit, chip } = blockKey(secret, k, length);
-      let coef = 0;
-      for (let i = 0; i < BLOCK; i++) {
-        const row = (by * BLOCK + i) * info.width;
-        for (let j = 0; j < BLOCK; j++) {
-          coef += data[(row + bx * BLOCK + j) * ch + CHANNEL] * BASIS[i][j];
-        }
+// Resynchronizing extraction for leaks that were rescaled (e.g. a screenshot at
+// a different resolution): resize back to the embedding grid so the 8x8 blocks
+// re-align, then search a few sub-block grid offsets and keep the strongest
+// correlation. Recovers from uniform rescaling, mild crop, blur and noise. Does
+// NOT correct perspective or rotation — a phone photo of a screen at an angle,
+// or a print-then-scan, still needs a registration/DNN front-end.
+export async function extractFingerprintImageRobust(
+  imageBuffer: Buffer,
+  length: number,
+  secret: string,
+  embedWidth: number,
+  embedHeight: number,
+  erasureEps = 0
+): Promise<Int8Array> {
+  // Force the leak back onto the original pixel grid.
+  const { data, info } = await sharp(imageBuffer)
+    .removeAlpha()
+    .resize(embedWidth, embedHeight, { fit: 'fill' })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  let best: Float64Array | null = null;
+  let bestEnergy = -1;
+  for (const oy of [0, 2, 4, 6]) {
+    for (const ox of [0, 2, 4, 6]) {
+      const accum = correlate(data, info.width, info.height, info.channels, length, secret, ox, oy);
+      let energy = 0;
+      for (let i = 0; i < length; i++) energy += Math.abs(accum[i]);
+      if (energy > bestEnergy) {
+        bestEnergy = energy;
+        best = accum;
       }
-      accum[bit] += coef * chip; // correlate against the chip
     }
   }
-
-  const bits = new Int8Array(length);
-  for (let i = 0; i < length; i++) {
-    if (Math.abs(accum[i]) <= erasureEps) bits[i] = -1;
-    else bits[i] = accum[i] > 0 ? 1 : 0;
-  }
-  return bits;
+  return bitsFromAccum(best as Float64Array, length, erasureEps);
 }

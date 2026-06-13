@@ -187,7 +187,7 @@ async function createForEachRecipient(
   // Collusion-secure fingerprints: each recipient's copy carries a distinct
   // Tardos codeword so even a colluded leak traces back to a real recipient.
   const fingerprints = buildCampaignFingerprints(recipients.length);
-  await saveCampaign(batchId, req.user!.userId, fingerprints);
+  let embedDims: { width: number; height: number } | undefined;
   try {
     for (let i = 0; i < recipients.length; i++) {
       const r = recipients[i];
@@ -199,6 +199,13 @@ async function createForEachRecipient(
       const payload = watermarkPayload(shareId, r.email);
       payload.fp = codeword;
       const extra = await process(shareId, payload, r.email, codewordBits);
+      // The processor reports the embedding grid via reserved keys; capture them
+      // for campaign-level resynchronization and keep them out of the DB row.
+      if (typeof extra.__w === 'number' && typeof extra.__h === 'number') {
+        embedDims = { width: extra.__w, height: extra.__h };
+      }
+      delete extra.__w;
+      delete extra.__h;
       await createShareRecord(req.user!.userId, token, type, shareId, {
         batch_id: batchId,
         fingerprint: codeword,
@@ -213,6 +220,7 @@ async function createForEachRecipient(
         shareUrl: buildShareUrl(token),
       });
     }
+    await saveCampaign(batchId, req.user!.userId, fingerprints, embedDims);
     return created;
   } catch (err) {
     await cleanupShares(shareIds);
@@ -246,8 +254,8 @@ router.post(
       const buffer = req.file.buffer;
 
       const shares = await createForEachRecipient(req, 'document', recipients, options, async (shareId, payload, _email, fingerprint) => {
-        const pageCount = await processPdf(buffer, shareId, payload, fingerprint);
-        return { page_count: pageCount };
+        const r = await processPdf(buffer, shareId, payload, fingerprint);
+        return { page_count: r.pageCount, __w: r.width, __h: r.height };
       });
 
       res.status(201).json({ shares });
@@ -291,8 +299,8 @@ router.post(
       const buffer = req.file.buffer;
 
       const shares = await createForEachRecipient(req, 'image', recipients, options, async (shareId, payload, _email, fingerprint) => {
-        await processImage(buffer, shareId, payload, fingerprint);
-        return {};
+        const d = await processImage(buffer, shareId, payload, fingerprint);
+        return { __w: d.width, __h: d.height };
       });
 
       res.status(201).json({ shares });
