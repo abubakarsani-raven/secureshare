@@ -112,7 +112,7 @@ export default function SecureVideoPlayer({ token, watermark }: Props) {
               </div>
             )}
             <canvas ref={canvasRef} className="w-full max-h-[70vh]" width={640} height={360} />
-            <GpuWatermark label={watermark} />
+            <GpuWatermark label={watermark} dark={true} />
             <div className="absolute bottom-0 left-0 right-0 z-30 bg-gradient-to-t from-black/80 p-4 flex items-center gap-4">
               <button onClick={togglePlay} className="text-white p-2 hover:bg-white/20 rounded">
                 {playing ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}

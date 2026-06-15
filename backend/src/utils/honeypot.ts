@@ -24,6 +24,7 @@ export async function generateHoneypotTokens(): Promise<void> {
       await supabase.from('shares').insert({
         token_hash: tokenHash,
         token_lookup: lookup,
+        token_prefix: token.slice(0, 8),
         type: 'message',
         recipient_name: 'HONEYPOT',
         recipient_email_hash: 'honeypot',

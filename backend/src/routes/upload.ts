@@ -77,6 +77,7 @@ async function createShareRecord(
     sender_id: userId,
     token_hash: tokenHash,
     token_lookup: lookup,
+    token_prefix: token.slice(0, 8),
     type,
     watermark_seed: generateWatermarkSeed(),
     storage_path: `shares/${shareId}`,
@@ -84,11 +85,12 @@ async function createShareRecord(
   };
   let { data, error } = await supabase.from('shares').insert(base).select('id').single();
   // Retry without the newer columns for deployments that haven't run the
-  // campaign / fingerprint migrations yet.
+  // campaign / fingerprint / token_prefix migrations yet.
   if (error) {
     const legacy: Record<string, unknown> = { ...base };
     delete legacy.batch_id;
     delete legacy.fingerprint;
+    delete legacy.token_prefix;
     ({ data, error } = await supabase.from('shares').insert(legacy).select('id').single());
   }
   if (error || !data) throw new Error('Failed to create share');
@@ -176,7 +178,8 @@ async function createForEachRecipient(
     shareId: string,
     payload: WatermarkPayload,
     email: string,
-    fingerprint: Uint8Array
+    fingerprint: Uint8Array,
+    token: string
   ) => Promise<Record<string, unknown>>
 ): Promise<CreatedShare[]> {
   const shareIds: string[] = [];
@@ -198,7 +201,7 @@ async function createForEachRecipient(
       const codeword = packBits(codewordBits);
       const payload = watermarkPayload(shareId, r.email);
       payload.fp = codeword;
-      const extra = await process(shareId, payload, r.email, codewordBits);
+      const extra = await process(shareId, payload, r.email, codewordBits, token);
       // The processor reports the embedding grid via reserved keys; capture them
       // for campaign-level resynchronization and keep them out of the DB row.
       if (typeof extra.__w === 'number' && typeof extra.__h === 'number') {
@@ -344,9 +347,11 @@ router.post(
       const options = parseSharedOptions(req.body);
       const input = tempPath;
 
-      const shares = await createForEachRecipient(req, 'video', recipients, options, async (shareId) => {
-        // The drawtext watermark is keyed to the per-recipient share id.
-        const { segmentCount, duration } = await processVideo(input, shareId, shareId.slice(0, 8));
+      const shares = await createForEachRecipient(req, 'video', recipients, options, async (shareId, _payload, _email, _fp, token) => {
+        // The burned drawtext mark carries the token prefix, matching the
+        // on-screen watermark and the shares.token_prefix column the leak
+        // investigator matches on.
+        const { segmentCount, duration } = await processVideo(input, shareId, token.slice(0, 8));
         return { chunk_count: segmentCount, duration_seconds: duration };
       });
 

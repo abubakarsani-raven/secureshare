@@ -27,8 +27,20 @@ function runFfmpeg(input: string, outputDir: string, watermarkText: string): Pro
         '-b:a 128k',
         '-movflags +faststart',
       ])
+      // Burned-in forensic mark: lives in the actual pixels, so it survives the
+      // leaker re-encoding or screen-recording the file (unlike the client-side
+      // on-screen overlay). The old params (fontsize 8, shown 1 frame in 30) were
+      // unrecoverable after recompression — testing showed OCR read nothing. These
+      // are tuned to survive a downscale + CRF 28 transcode while staying subtle:
+      //   - fontsize 26 with a black halo: legible on any background once revealed
+      //   - white@0.4: faint, and only flickers in for 3 of every 12 frames (~1/8 s
+      //     every half second) so it reads as a momentary glint, not a banner
+      //   - position drifts so it can't be cropped out at a fixed spot
+      // The text is the share token prefix, matching the on-screen watermark and
+      // the shares.token_prefix column the leak investigator already matches on.
       .videoFilters(
-        `drawtext=text='${watermarkText}':fontsize=8:fontcolor=white@0.3:x=mod(n\\,30)*10:y=mod(n\\,30)*10:enable='eq(mod(n\\,30)\\,0)'`
+        `drawtext=text='ID ${watermarkText}':fontsize=26:fontcolor=white@0.4:borderw=2:bordercolor=black@0.5:` +
+          `x=(w-tw)/2+mod(n\\,90)*2:y=h*0.12+mod(n\\,120):enable='lt(mod(n\\,12)\\,3)'`
       )
       .output(outputPath)
       .on('end', () => resolve(outputPath))

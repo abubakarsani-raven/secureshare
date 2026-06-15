@@ -1,14 +1,18 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { useTheme } from '@/context/ThemeContext';
 
 interface Props {
   // Identifying text baked into every view (recipient + share id + time).
   label: string;
-  // 0..1 overall opacity. Defaults to a faint-but-visible level (like a bank
-  // statement watermark): noticeable if you look, and dark enough that the leak
-  // tool can OCR the label off a screenshot to auto-identify the recipient.
+  // 0..1 overall opacity. Defaults to ~5%: invisible to the naked eye but
+  // above the JPEG noise floor so the extractor's normalise pass recovers it.
   opacity?: number;
+  // Override the background darkness. Pass true for viewers with a known dark
+  // background (e.g. video player, black-background images) regardless of the
+  // app theme; omit to follow the active theme automatically.
+  dark?: boolean;
 }
 
 // Renders a tiled, rotated forensic watermark on the GPU (WebGL). The label is
@@ -16,10 +20,19 @@ interface Props {
 // it across the whole surface — so tiling/rotation/compositing run on the GPU
 // rather than on the 2D canvas CPU path. The layer is pointer-events:none and
 // sits above the content; because it is part of the rendered pixels it survives
-// screenshots, unlike invisible LSB/DCT marks. It carries a light+dark pair so
-// the mark is recoverable on both light and dark backgrounds.
-export default function GpuWatermark({ label, opacity = 0.25 }: Props) {
+// screenshots, unlike invisible LSB/DCT marks.
+//
+// Opacity is kept at 5% — invisible to the naked eye but above the JPEG noise
+// floor (~5 luma units). The extractor's greyscale+normalise pass stretches the
+// ~14-unit delta back to full contrast for reliable OCR. This matches how
+// Netflix, Zoom, and enterprise DLP tools embed on-screen forensic marks.
+//
+// Colors adapt to the background: dark text on light, light text on dark —
+// both produce a ~14-unit recoverable luma delta after normalise.
+export default function GpuWatermark({ label, opacity = 0.05, dark: darkProp }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { theme } = useTheme();
+  const isDark = darkProp !== undefined ? darkProp : theme === 'dark';
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -49,13 +62,16 @@ export default function GpuWatermark({ label, opacity = 0.25 }: Props) {
     const measured = tctx.measureText(label).width || TILE;
     fontSize = Math.max(14, Math.min(64, (fontSize * (TILE * 0.92)) / measured));
     tctx.font = `700 ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    // Draw a white halo under dark text so the label stays legible on both
-    // light backgrounds (messages/documents) and dark ones (video/photos).
+    // On light backgrounds use dark fill + white halo; on dark backgrounds flip
+    // them. Both produce a ~14-unit luma delta that survives JPEG and is
+    // recovered by the extractor's normalise pass.
+    const fillColor = isDark ? 'rgba(240,240,240,0.92)' : 'rgba(15,15,15,0.92)';
+    const haloColor = isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.85)';
     const draw = (cx: number, cy: number) => {
       tctx.lineWidth = Math.max(4, fontSize * 0.12);
-      tctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      tctx.strokeStyle = haloColor;
       tctx.strokeText(label, cx, cy);
-      tctx.fillStyle = 'rgba(15,15,15,0.92)';
+      tctx.fillStyle = fillColor;
       tctx.fillText(label, cx, cy);
     };
     draw(TILE / 2, TILE / 4);
@@ -163,7 +179,7 @@ export default function GpuWatermark({ label, opacity = 0.25 }: Props) {
       gl.deleteBuffer(buf);
       gl.deleteProgram(prog);
     };
-  }, [label, opacity]);
+  }, [label, opacity, isDark]);
 
   return (
     <canvas

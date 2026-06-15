@@ -15,6 +15,7 @@ CREATE TABLE shares (
   batch_id              UUID,
   token_hash            TEXT UNIQUE NOT NULL,
   token_lookup          TEXT,
+  token_prefix          TEXT,
   type                  TEXT NOT NULL CHECK (type IN ('document','image','video','audio','message')),
   storage_path          TEXT,
   ciphertext            TEXT,
@@ -43,6 +44,7 @@ CREATE TABLE shares (
 );
 
 CREATE INDEX idx_shares_token_lookup ON shares(token_lookup);
+CREATE INDEX idx_shares_token_prefix ON shares(token_prefix);
 CREATE INDEX idx_shares_sender_id ON shares(sender_id);
 CREATE INDEX idx_shares_batch_id ON shares(batch_id);
 
@@ -123,6 +125,10 @@ $$ LANGUAGE sql;
 -- Migration for campaign grouping (one upload -> many recipient copies):
 -- ALTER TABLE shares ADD COLUMN IF NOT EXISTS batch_id UUID;
 -- CREATE INDEX IF NOT EXISTS idx_shares_batch_id ON shares(batch_id);
+
+-- Migration for on-screen watermark token prefix (leak investigator exact match):
+-- ALTER TABLE shares ADD COLUMN IF NOT EXISTS token_prefix TEXT;
+-- CREATE INDEX IF NOT EXISTS idx_shares_token_prefix ON shares(token_prefix);
 
 -- Migration for Tardos collusion-secure fingerprinting:
 -- ALTER TABLE shares ADD COLUMN IF NOT EXISTS fingerprint TEXT;
