@@ -14,6 +14,7 @@ import { AuthPayload } from '../middleware/auth';
 import { getSupabase } from '../services/storage';
 import { safeCompare } from '../utils/helpers';
 import { traceImageLeak, TraceResult } from '../services/fingerprint/fingerprintService';
+import { dewarpPerspective, Point } from '../services/dewarp';
 import { logger } from '../utils/logger';
 
 const execFileAsync = promisify(execFile);
@@ -363,6 +364,25 @@ async function sampleVideoFrames(buffer: Buffer, maxFrames = 36): Promise<Buffer
   }
 }
 
+// Parses the four screen corners the caller marked on an angled phone-photo
+// (top-left, top-right, bottom-right, bottom-left), in the uploaded image's own
+// pixel coordinates. Returns null unless exactly four numeric points are given.
+function parseCorners(raw: unknown): Point[] | null {
+  let arr: unknown = raw;
+  if (typeof raw === 'string') {
+    try { arr = JSON.parse(raw); } catch { return null; }
+  }
+  if (!Array.isArray(arr) || arr.length !== 4) return null;
+  const pts: Point[] = [];
+  for (const p of arr) {
+    const x = Number((p as Point)?.x);
+    const y = Number((p as Point)?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    pts.push({ x, y });
+  }
+  return pts;
+}
+
 router.post('/extract', requireAdminOrUser, upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
@@ -372,9 +392,25 @@ router.post('/extract', requireAdminOrUser, upload.single('file'), async (req: R
 
     const isVideo = (req.file.mimetype || '').startsWith('video/');
 
+    // Phone-photo of a screen taken at an angle: if the caller marked the four
+    // screen corners, perspective-correct to a frontal rectangle first so the
+    // rest of the pipeline (which assumes a fronto-parallel capture) can read
+    // the watermark. Falls back to the original buffer if dewarping fails.
+    let sourceBuffer = req.file.buffer;
+    if (!isVideo) {
+      const corners = parseCorners(req.body?.corners);
+      if (corners) {
+        try {
+          sourceBuffer = await dewarpPerspective(req.file.buffer, corners);
+        } catch (err) {
+          logger.warn('Dewarp failed', { error: String(err) });
+        }
+      }
+    }
+
     const result = isVideo
       ? { found: false, method: null, payload: null }
-      : await extractWatermark(req.file.buffer);
+      : await extractWatermark(sourceBuffer);
 
     let match: ShareMatch | null = null;
     let collusion: { threshold: number; ranked: TraceResult[] } | null = null;
@@ -404,22 +440,22 @@ router.post('/extract', requireAdminOrUser, upload.single('file'), async (req: R
           }
         }
       } else {
-        // Screenshot / still image: no embedded mark, but the on-screen watermark
-        // survives. Reveal it for display.
-        const revealed = await revealBuffer(req.file.buffer);
+        // Screenshot / still image (perspective-corrected above if corners were
+        // supplied): no embedded mark, but the on-screen watermark survives.
+        const revealed = await revealBuffer(sourceBuffer);
         reveal = `data:image/png;base64,${revealed.toString('base64')}`;
         if (!match && req.user) {
           // Fast path: OCR the whole reveal (plain + orientation-enhanced pass
           // that suppresses horizontal body text), unioned before matching.
           ocrText = await ocrRevealed(revealed);
-          const oriented = await revealOriented(req.file.buffer);
+          const oriented = await revealOriented(sourceBuffer);
           ocrText += ' ' + (await ocrRevealed(oriented));
           match = await matchOwnShare(req.user.userId, ocrText);
           // Heavy fallback: when bold content (a message heading, dense text)
           // swamps whole-image OCR, deskew and OCR each watermark tile in
           // isolation, then vote — recovers the token where the fast path can't.
           if (!match) {
-            const voted = await ocrCropVote(req.file.buffer);
+            const voted = await ocrCropVote(sourceBuffer);
             ocrText += ' ' + voted;
             match = await matchOwnShare(req.user.userId, voted);
           }
@@ -442,7 +478,7 @@ router.post('/extract', requireAdminOrUser, upload.single('file'), async (req: R
           .eq('id', match.shareId)
           .single();
         if (share?.batch_id) {
-          collusion = await traceImageLeak(share.batch_id, req.file.buffer, req.user?.userId);
+          collusion = await traceImageLeak(share.batch_id, sourceBuffer, req.user?.userId);
         }
       } catch (err) {
         logger.warn('Collusion trace failed', { error: String(err) });

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { Search, Upload, ScrollText } from 'lucide-react';
+import CornerPicker, { Point } from './CornerPicker';
 
 interface ShareMatch {
   recipientName: string;
@@ -77,6 +78,17 @@ export default function LeakInvestigator({ onViewAuditTrail }: { onViewAuditTrai
   const [manualQuery, setManualQuery] = useState('');
   const [manualMatch, setManualMatch] = useState<ShareMatch | null | undefined>(undefined);
   const [manualLoading, setManualLoading] = useState(false);
+  // Angled phone-photo mode: the user marks the screen corners so the backend
+  // can perspective-correct before extraction.
+  const [angledMode, setAngledMode] = useState(false);
+  const [corners, setCorners] = useState<Point[] | null>(null);
+
+  const onFileChange = (f: File | null) => {
+    setFile(f);
+    setAngledMode(false);
+    setCorners(null);
+    setResult(null);
+  };
 
   const handleExtract = async () => {
     if (!file) return;
@@ -87,6 +99,7 @@ export default function LeakInvestigator({ onViewAuditTrail }: { onViewAuditTrai
     try {
       const formData = new FormData();
       formData.append('file', file);
+      if (angledMode && corners) formData.append('corners', JSON.stringify(corners));
       const data = await apiFetch<ExtractResult>('/api/admin/extract', {
         method: 'POST',
         auth: true,
@@ -139,7 +152,7 @@ export default function LeakInvestigator({ onViewAuditTrail }: { onViewAuditTrai
         <input
           type="file"
           accept="image/*,video/*"
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
+          onChange={(e) => onFileChange(e.target.files?.[0] || null)}
           className="flex-1 text-sm"
         />
         <button
@@ -151,6 +164,25 @@ export default function LeakInvestigator({ onViewAuditTrail }: { onViewAuditTrai
           {loading ? 'Analyzing...' : 'Extract'}
         </button>
       </div>
+
+      {/* Angled phone-photo correction: only meaningful for still images. */}
+      {file && file.type.startsWith('image/') && (
+        <div className="mt-3">
+          <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+            <input
+              type="checkbox"
+              checked={angledMode}
+              onChange={(e) => setAngledMode(e.target.checked)}
+            />
+            This is an angled photo of a screen — let me mark the corners
+          </label>
+          {angledMode && (
+            <div className="mt-2 p-3 rounded-lg bg-blue-50 border border-blue-200 dark:bg-blue-900/20 dark:border-blue-800">
+              <CornerPicker file={file} onCorners={setCorners} />
+            </div>
+          )}
+        </div>
+      )}
 
       {result && (
         <div className="mt-4 p-4 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 space-y-4">
