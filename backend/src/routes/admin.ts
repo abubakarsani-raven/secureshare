@@ -8,6 +8,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import ffmpegStatic from 'ffmpeg-static';
+import axios from 'axios';
 import { createWorker, Worker } from 'tesseract.js';
 import { extractWatermark } from '../services/watermark/extractor';
 import { AuthPayload } from '../middleware/auth';
@@ -88,6 +89,25 @@ async function revealOriented(buffer: Buffer): Promise<Buffer> {
   return sharp(out, { raw: info }).normalise().resize({ width: info.width * 2 }).png().toBuffer();
 }
 
+// Optional stronger-OCR fallback: a self-hosted PaddleOCR sidecar (see
+// paddleocr-sidecar/). PaddleOCR is markedly more accurate than Tesseract on
+// faint/rotated text and has a built-in angle classifier. It runs on your own
+// infrastructure (no third party sees the leaked content). Enabled only when
+// PADDLE_OCR_URL is set; returns null otherwise so the cascade falls through.
+async function paddleOcr(revealed: Buffer): Promise<string | null> {
+  const url = process.env.PADDLE_OCR_URL;
+  if (!url) return null;
+  try {
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array(revealed)]), 'reveal.png');
+    const { data } = await axios.post(`${url.replace(/\/$/, '')}/ocr`, form, { timeout: 20000 });
+    return typeof data?.text === 'string' && data.text.trim() ? data.text : null;
+  } catch (err) {
+    logger.warn('PaddleOCR sidecar failed', { error: String(err) });
+    return null;
+  }
+}
+
 // Lazily created, reused OCR worker. Loading the model is expensive, so keep one
 // alive across requests rather than per call.
 let ocrWorker: Promise<Worker> | null = null;
@@ -153,18 +173,31 @@ async function ocrCropVote(buffer: Buffer): Promise<string> {
     const step = Math.round(cell * 0.6);
     let text = '';
     let cells = 0;
-    for (let y = 0; y + Math.round(cell * 0.5) <= dh && cells < 30; y += step) {
-      for (let x = 0; x + cell <= dw && cells < 30; x += step) {
-        const crop = await sharp(deskewed)
-          .extract({ left: x, top: y, width: cell, height: Math.round(cell * 0.5) })
-          .normalise()
-          .resize({ width: cell * 3 })
-          .png()
-          .toBuffer();
-        const { data } = await worker.recognize(crop);
-        text += ' ' + data.text;
-        cells++;
+    // Each crop holds ~one watermark label line, so tell Tesseract to treat it as
+    // a single line (PSM 7) and restrict the alphabet to what the label can
+    // contain. Both sharply cut OCR noise on the token. Reset afterwards so the
+    // shared worker's whole-image passes keep their default behaviour.
+    await worker.setParameters({
+      tessedit_pageseg_mode: '7' as never,
+      tessedit_char_whitelist:
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -_',
+    });
+    try {
+      for (let y = 0; y + Math.round(cell * 0.5) <= dh && cells < 30; y += step) {
+        for (let x = 0; x + cell <= dw && cells < 30; x += step) {
+          const crop = await sharp(deskewed)
+            .extract({ left: x, top: y, width: cell, height: Math.round(cell * 0.5) })
+            .normalise()
+            .resize({ width: cell * 3 })
+            .png()
+            .toBuffer();
+          const { data } = await worker.recognize(crop);
+          text += ' ' + data.text;
+          cells++;
+        }
       }
+    } finally {
+      await worker.setParameters({ tessedit_pageseg_mode: '3' as never, tessedit_char_whitelist: '' });
     }
     return text;
   } catch (err) {
@@ -458,6 +491,15 @@ router.post('/extract', requireAdminOrUser, upload.single('file'), async (req: R
             const voted = await ocrCropVote(sourceBuffer);
             ocrText += ' ' + voted;
             match = await matchOwnShare(req.user.userId, voted);
+          }
+          // Last resort: a stronger self-hosted OCR engine (PaddleOCR sidecar),
+          // if configured. Skipped entirely when PADDLE_OCR_URL is unset.
+          if (!match) {
+            const paddle = await paddleOcr(revealed);
+            if (paddle) {
+              ocrText += ' ' + paddle;
+              match = await matchOwnShare(req.user.userId, paddle);
+            }
           }
         }
       }
