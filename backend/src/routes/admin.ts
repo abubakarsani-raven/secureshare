@@ -122,6 +122,56 @@ async function ocrRevealed(revealed: Buffer): Promise<string> {
   }
 }
 
+// Crop-and-vote OCR: the heavy fallback for when whole-image OCR is swamped by
+// bold foreground content (e.g. a message's own heading) or dense body text.
+// We deskew the reveal so the tiled watermark label is horizontal, then walk a
+// grid of overlapping cells and OCR each one IN ISOLATION — a single label
+// instance on a near-uniform crop reads far more cleanly than the whole frame.
+// The concatenated text from all cells feeds the same fuzzy matcher, so the
+// correct token wins by appearing across many copies. Mirrors how a person
+// reads the repeated mark by eye. Bounded to keep OCR work in check.
+async function ocrCropVote(buffer: Buffer): Promise<string> {
+  try {
+    const worker = await getOcrWorker();
+    const meta = await sharp(buffer).metadata();
+    const baseW = (meta.width || 800) * 2;
+    // Deskew by the known tilt so the diagonal label lands horizontal.
+    const deskewed = await sharp(buffer)
+      .greyscale()
+      .normalise()
+      .rotate(WATERMARK_TILT_DEG, { background: '#ffffff' })
+      .resize({ width: baseW })
+      .png()
+      .toBuffer();
+    const dmeta = await sharp(deskewed).metadata();
+    const dw = dmeta.width || baseW;
+    const dh = dmeta.height || baseW;
+    // One cell ≈ a fifth of the width (about one tiled label); 40% overlap so a
+    // label straddling a boundary still lands whole in some cell.
+    const cell = Math.max(160, Math.round(dw / 5));
+    const step = Math.round(cell * 0.6);
+    let text = '';
+    let cells = 0;
+    for (let y = 0; y + Math.round(cell * 0.5) <= dh && cells < 30; y += step) {
+      for (let x = 0; x + cell <= dw && cells < 30; x += step) {
+        const crop = await sharp(deskewed)
+          .extract({ left: x, top: y, width: cell, height: Math.round(cell * 0.5) })
+          .normalise()
+          .resize({ width: cell * 3 })
+          .png()
+          .toBuffer();
+        const { data } = await worker.recognize(crop);
+        text += ' ' + data.text;
+        cells++;
+      }
+    }
+    return text;
+  } catch (err) {
+    logger.warn('Crop-vote OCR failed', { error: String(err) });
+    return '';
+  }
+}
+
 const normalize = (s: string): string =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -354,18 +404,25 @@ router.post('/extract', requireAdminOrUser, upload.single('file'), async (req: R
           }
         }
       } else {
-        // Screenshot / still image: a screenshot has no embedded mark, but the
-        // faint on-screen watermark survives — reveal it, OCR it, fuzzy-match.
+        // Screenshot / still image: no embedded mark, but the on-screen watermark
+        // survives. Reveal it for display.
         const revealed = await revealBuffer(req.file.buffer);
         reveal = `data:image/png;base64,${revealed.toString('base64')}`;
-        if (!match) {
+        if (!match && req.user) {
+          // Fast path: OCR the whole reveal (plain + orientation-enhanced pass
+          // that suppresses horizontal body text), unioned before matching.
           ocrText = await ocrRevealed(revealed);
-          // Add an orientation-enhanced pass that suppresses horizontal body
-          // text, recovering watermark glyphs a dense document would bury. Both
-          // passes' text is unioned before matching, so this only ever helps.
           const oriented = await revealOriented(req.file.buffer);
           ocrText += ' ' + (await ocrRevealed(oriented));
-          if (req.user) match = await matchOwnShare(req.user.userId, ocrText);
+          match = await matchOwnShare(req.user.userId, ocrText);
+          // Heavy fallback: when bold content (a message heading, dense text)
+          // swamps whole-image OCR, deskew and OCR each watermark tile in
+          // isolation, then vote — recovers the token where the fast path can't.
+          if (!match) {
+            const voted = await ocrCropVote(req.file.buffer);
+            ocrText += ' ' + voted;
+            match = await matchOwnShare(req.user.userId, voted);
+          }
         }
       }
     } catch (err) {

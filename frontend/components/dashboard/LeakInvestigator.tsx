@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { apiFetch } from '@/lib/api';
-import { Search, Upload } from 'lucide-react';
+import { Search, Upload, ScrollText } from 'lucide-react';
 
 interface ShareMatch {
   recipientName: string;
@@ -34,7 +34,7 @@ interface ExtractResult {
   } | null;
 }
 
-function MatchCard({ match }: { match: ShareMatch }) {
+function MatchCard({ match, onViewAuditTrail }: { match: ShareMatch; onViewAuditTrail?: (shareId: string) => void }) {
   return (
     <div className="p-4 rounded-lg bg-green-50 border border-green-200 dark:bg-green-900/20 dark:border-green-800">
       <div className="flex items-center justify-between gap-2">
@@ -57,15 +57,20 @@ function MatchCard({ match }: { match: ShareMatch }) {
         <span className="text-green-700 dark:text-green-400">Views</span>
         <span>{match.viewCount}</span>
       </div>
-      <p className="mt-3 text-xs text-green-700 dark:text-green-400">
-        Find this recipient in "Your shares" above to see the full audit trail —
-        precise location, device, and time of every view.
-      </p>
+      {onViewAuditTrail && (
+        <button
+          onClick={() => onViewAuditTrail(match.shareId)}
+          className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-green-800 hover:text-green-900 dark:text-green-300 dark:hover:text-green-200 underline underline-offset-2"
+        >
+          <ScrollText className="w-4 h-4" />
+          View full audit trail — location, device, and time of every view
+        </button>
+      )}
     </div>
   );
 }
 
-export default function LeakInvestigator() {
+export default function LeakInvestigator({ onViewAuditTrail }: { onViewAuditTrail?: (shareId: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<ExtractResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -150,7 +155,7 @@ export default function LeakInvestigator() {
       {result && (
         <div className="mt-4 p-4 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 space-y-4">
           {autoMatch ? (
-            <MatchCard match={autoMatch} />
+            <MatchCard match={autoMatch} onViewAuditTrail={onViewAuditTrail} />
           ) : (
             <p className="text-sm text-zinc-500">
               Could not auto-identify a recipient. Read the name and code off the
@@ -234,7 +239,7 @@ export default function LeakInvestigator() {
               </div>
               {manualMatch !== undefined && (
                 manualMatch
-                  ? <MatchCard match={manualMatch} />
+                  ? <MatchCard match={manualMatch} onViewAuditTrail={onViewAuditTrail} />
                   : <p className="text-xs text-red-600 dark:text-red-400">No matching share found. Check the spelling or try just the short code.</p>
               )}
             </div>

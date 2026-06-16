@@ -41,7 +41,7 @@ export default function SecureImageViewer({ token, watermark }: Props) {
 
   return (
     <DevToolsDetector>
-      <AntiCapture>
+      <AntiCapture token={token}>
         <FocusGuard>
           <div className="relative flex justify-center bg-zinc-100 rounded-lg min-h-[400px] items-center">
             {loading && <div className="absolute text-zinc-500">Loading image...</div>}

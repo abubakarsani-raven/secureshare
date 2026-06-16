@@ -47,7 +47,7 @@ export default function SecureDocViewer({ token, pageCount, watermark }: Props) 
 
   return (
     <DevToolsDetector>
-      <AntiCapture>
+      <AntiCapture token={token}>
         <FocusGuard>
           <div className="flex flex-col items-center gap-4">
             <div className="relative bg-zinc-100 rounded-lg overflow-hidden min-h-[400px] flex items-center justify-center">

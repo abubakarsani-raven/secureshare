@@ -18,6 +18,18 @@ interface AuditEntry {
   timestamp: string;
 }
 
+// Human-readable labels for stored event codes. Capture signals are flagged so
+// they stand out in the timeline.
+const EVENT_LABELS: Record<string, string> = {
+  content_viewed: 'Viewed',
+  share_created: 'Share created',
+  message_destroyed: 'Message destroyed',
+  possible_screenshot: '⚠ Possible screenshot',
+  screen_recording_attempt: '⚠ Screen-recording attempt',
+  viewer_focus_lost: 'Viewer lost focus',
+};
+const CAPTURE_EVENTS = new Set(['possible_screenshot', 'screen_recording_attempt', 'viewer_focus_lost']);
+
 export default function AuditLog({ shareId }: { shareId: string }) {
   const [logs, setLogs] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,7 +59,9 @@ export default function AuditLog({ shareId }: { shareId: string }) {
         <tbody>
           {logs.map((log) => (
             <tr key={log.id} className="border-b border-zinc-100 dark:border-zinc-800">
-              <td className="py-2 pr-4 font-medium">{log.event}</td>
+              <td className={`py-2 pr-4 font-medium ${CAPTURE_EVENTS.has(log.event) ? 'text-amber-600 dark:text-amber-400' : ''}`}>
+                {EVENT_LABELS[log.event] || log.event}
+              </td>
               <td className="py-2 pr-4">{log.city}, {log.country}</td>
               <td className="py-2 pr-4">
                 {log.latitude != null && log.longitude != null ? (

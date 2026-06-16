@@ -131,7 +131,7 @@ export default function SecureAudioPlayer({ token, chunkCount }: Props) {
 
   return (
     <DevToolsDetector>
-      <AntiCapture>
+      <AntiCapture token={token}>
         <FocusGuard>
           <div className="bg-zinc-900 rounded-xl p-6">
             {loading && <div className="text-zinc-400 mb-4">Loading audio...</div>}

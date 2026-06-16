@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FileText, Image, Video, Music, MessageSquare, ChevronDown, ChevronUp, Users } from 'lucide-react';
 import AuditLog from './AuditLog';
 import RevokeButton from './RevokeButton';
@@ -60,9 +60,34 @@ function groupCampaigns(shares: Share[]): Campaign[] {
   );
 }
 
-export default function SharesList({ shares, onRefresh }: { shares: Share[]; onRefresh: () => void }) {
+export default function SharesList({
+  shares,
+  onRefresh,
+  focusShareId,
+}: {
+  shares: Share[];
+  onRefresh: () => void;
+  focusShareId?: string | null;
+}) {
   const [expandedCampaign, setExpandedCampaign] = useState<string | null>(null);
   const [expandedShare, setExpandedShare] = useState<string | null>(null);
+
+  // The leak investigator can focus a share by id: expand its campaign + row so
+  // the audit trail is visible, then scroll it into view.
+  useEffect(() => {
+    if (!focusShareId) return;
+    const target = shares.find((s) => s.id === focusShareId);
+    if (!target) return;
+    setExpandedCampaign(target.batchId || target.id);
+    setExpandedShare(focusShareId);
+    // Defer until the expanded rows have rendered.
+    const t = setTimeout(() => {
+      document
+        .querySelector(`[data-share-id="${focusShareId}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+    return () => clearTimeout(t);
+  }, [focusShareId, shares]);
 
   if (shares.length === 0) {
     return <p className="text-zinc-500 dark:text-zinc-400 text-center py-8">No shares yet. Send your first traceable file!</p>;
@@ -110,10 +135,13 @@ export default function SharesList({ shares, onRefresh }: { shares: Share[]; onR
                 {c.shares.map((share) => {
                   const status = getStatus(share);
                   const open = expandedShare === share.id;
+                  const focused = focusShareId === share.id;
                   return (
-                    <div key={share.id}>
+                    <div key={share.id} data-share-id={share.id}>
                       <div
-                        className="flex items-center gap-3 p-4 pl-6 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                        className={`flex items-center gap-3 p-4 pl-6 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50 ${
+                          focused ? 'ring-2 ring-inset ring-green-400 dark:ring-green-600' : ''
+                        }`}
                         onClick={() => setExpandedShare(open ? null : share.id)}
                       >
                         <div className="flex-1 min-w-0">

@@ -36,6 +36,8 @@ export default function DashboardPage() {
   const router = useRouter();
   const [stats, setStats] = useState<Stats | null>(null);
   const [shares, setShares] = useState<Share[]>([]);
+  // When the leak investigator traces a leak, jump to that share's audit trail.
+  const [focusShareId, setFocusShareId] = useState<string | null>(null);
 
   const load = () => {
     apiFetch<Stats>('/api/dashboard/stats', { auth: true }).then(setStats).catch(console.error);
@@ -105,10 +107,10 @@ export default function DashboardPage() {
 
         <div className="bg-white border rounded-xl p-6 mb-8 dark:bg-zinc-900 dark:border-zinc-800">
           <h2 className="font-semibold text-lg mb-4">Your shares</h2>
-          <SharesList shares={shares} onRefresh={load} />
+          <SharesList shares={shares} onRefresh={load} focusShareId={focusShareId} />
         </div>
 
-        <LeakInvestigator />
+        <LeakInvestigator onViewAuditTrail={setFocusShareId} />
       </div>
     </div>
   );

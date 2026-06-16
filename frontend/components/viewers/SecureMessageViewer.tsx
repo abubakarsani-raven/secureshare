@@ -120,7 +120,7 @@ export default function SecureMessageViewer({ token, selfDestructSeconds, waterm
 
   return (
     <DevToolsDetector>
-      <AntiCapture>
+      <AntiCapture token={token}>
         <FocusGuard>
           <div className="relative">
             {countdown > 0 && (

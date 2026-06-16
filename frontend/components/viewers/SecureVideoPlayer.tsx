@@ -103,7 +103,7 @@ export default function SecureVideoPlayer({ token, watermark }: Props) {
 
   return (
     <DevToolsDetector>
-      <AntiCapture>
+      <AntiCapture token={token}>
         <FocusGuard>
           <div className="relative bg-black rounded-lg overflow-hidden">
             {loading && (

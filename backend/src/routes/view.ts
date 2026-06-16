@@ -5,6 +5,7 @@ import { findShareByToken, isShareAccessible, incrementViewCount, ShareRecord } 
 import { downloadFile } from '../services/storage';
 import { decryptSerialized, getEncryptionKey } from '../services/encryption';
 import { logAudit } from '../services/auditService';
+import { notifyCaptureEvent } from '../services/notificationService';
 import { getSupabase } from '../services/storage';
 import { checkHoneypotAccess } from '../utils/honeypot';
 import { xorBase64Fragments } from '../utils/helpers';
@@ -255,6 +256,38 @@ router.post('/:token/message/destroy', viewLimiter, requireViewSession, async (r
     await supabase.from('shares').update({ destroyed_at: new Date().toISOString() }).eq('id', result.share.id);
     await logAudit(result.share.id, 'message_destroyed', req);
     res.json({ destroyed: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Records a best-effort "possible capture" signal reported by the secure viewer
+// (a PrintScreen keypress, a screen-recording attempt, or the viewer losing
+// focus). These are heuristics, not proof — the browser has no real screenshot
+// API — so they are logged to the audit trail as distinct events for the sender
+// to review, alongside the forensic watermark that traces an actual leak.
+const CAPTURE_EVENTS: Record<string, string> = {
+  screenshot: 'possible_screenshot',
+  recording: 'screen_recording_attempt',
+  focus_lost: 'viewer_focus_lost',
+};
+router.post('/:token/capture-event', viewLimiter, requireViewSession, async (req: Request, res: Response) => {
+  try {
+    const result = await getShareForSession(req);
+    if ('error' in result) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    const event = CAPTURE_EVENTS[String(req.body?.type || '')];
+    if (!event) {
+      res.status(400).json({ error: 'Unknown capture type' });
+      return;
+    }
+    await logAudit(result.share.id, event, req);
+    // Email the sender for the high-signal events (throttled inside). Fire-and-
+    // forget so it never delays or fails the viewer's response.
+    void notifyCaptureEvent(result.share.id, event, req);
+    res.json({ logged: true });
   } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
